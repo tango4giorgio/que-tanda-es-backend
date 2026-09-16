@@ -1,0 +1,52 @@
+name: Release Lambda packages
+
+# Builds the three Lambda deployment packages (get_round.zip, gateway.zip,
+# submit_feedback.zip) and publishes them as assets on a GitHub Release whenever a "v*" tag is
+# pushed. backend-infra's Terraform config downloads these assets by tag (see
+# backend-infra/lambda_packages.tf) instead of relying on a locally-built zip.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Lambda packages
+        run: |
+          set -euo pipefail
+          mkdir -p dist build
+
+          # All three Lambdas (round delivery, feedback submission, reverse-proxy gateway)
+          # share one dependency set (see pyproject.toml), so vendor it once for the deployed
+          # arm64/python3.12 Lambda runtime and reuse the build folder for each zip.
+          python3.12 -m pip install --platform manylinux2014_aarch64 --target build/ \
+            --only-binary=:all: --python-version 3.12 -e .
+          cp -r src build/
+
+          cd build
+          zip -r ../dist/get_round.zip .
+          zip -r ../dist/submit_feedback.zip .
+          zip -r ../dist/gateway.zip .
+          cd ..
+          rm -rf build
+
+      - name: Publish release with package assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          gh release create "$tag" \
+            --title "$tag" \
+            --generate-notes \
+            dist/get_round.zip dist/gateway.zip dist/submit_feedback.zip
