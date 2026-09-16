@@ -1,0 +1,21 @@
+{
+  "default_timeout_seconds": 10,
+  "entries": [
+    {
+      "method": "GET",
+      "path": "/round",
+      "target_function_name": "tango-music-game-get-round"
+    },
+    {
+      "method": "GET",
+      "path": "/leaderboard",
+      "target_function_name": "tango-music-game-get-leaderboard",
+      "timeout_seconds": 5
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "target_function_name": "tango-music-game-does-not-exist"
+    }
+  ]
+}
