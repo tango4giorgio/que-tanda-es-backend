@@ -1,26 +1,27 @@
+import json
 from unittest.mock import patch
 
 from src.handlers.get_catalogue import lambda_handler
 
 
 def test_get_catalogue_contract() -> None:
-    fake_service_response = {
-        "statusCode": 200,
-        "headers": {"content-type": "application/json"},
-        "body": (
-            '{"version":"test","generatedAt":"2026-09-14T00:00:00Z",'
-            '"orchestras":[{"id":"di-sarli","displayName":"Carlos Di Sarli"}],'
-            '"tracks":[{"id":"track","orchestraId":"di-sarli","title":"Track",'
-            '"previewUrl":"https://example.test/track.mp3","durationMs":120000}]}'
+    with (
+        patch("src.handlers.get_catalogue.connection"),
+        patch(
+            "src.handlers.get_catalogue.CatalogueService.get_provider_links",
+            return_value=[
+                {
+                    "recordingId": "5a5d9d31-64a7-4a5d-87bd-1934d7efbb84",
+                    "links": [
+                        {
+                            "provider": "archive.org",
+                            "url": "https://example.test/track.mp3",
+                            "durationMs": 120_000,
+                        }
+                    ],
+                }
+            ],
         ),
-    }
-    with patch("src.handlers.get_catalogue.connection"), patch(
-        "src.handlers.get_catalogue.CatalogueService.get_catalogue",
-        return_value=type(
-            "Response",
-            (),
-            {"model_dump_json": lambda self, by_alias: fake_service_response["body"]},
-        )(),
     ):
         response = lambda_handler(
             {
@@ -35,3 +36,9 @@ def test_get_catalogue_contract() -> None:
             None,
         )
     assert response["statusCode"] == 200
+    assert response["headers"]["cache-control"] == "public, max-age=60"
+    payload = json.loads(response["body"])
+    assert isinstance(payload["recordings"], list)
+    assert payload["recordings"][0]["recordingId"] == ("5a5d9d31-64a7-4a5d-87bd-1934d7efbb84")
+    assert payload["recordings"][0]["links"][0]["provider"] == "archive.org"
+    assert not {"artist", "title", "release", "artistCredit"} & set(payload["recordings"][0])

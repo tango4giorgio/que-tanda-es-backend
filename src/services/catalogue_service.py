@@ -1,7 +1,5 @@
-import hashlib
-import json
+from collections import defaultdict
 
-from src.models.catalogue import CatalogueResponse
 from src.repositories.catalogue_repository import CatalogueRepository
 
 
@@ -9,16 +7,20 @@ class CatalogueService:
     def __init__(self, repository: CatalogueRepository):
         self.repository = repository
 
-    def get_catalogue(self) -> CatalogueResponse:
-        orchestras, tracks = self.repository.get_usable_catalogue()
-        version_payload = {
-            "orchestras": orchestras,
-            "tracks": [track.model_dump(mode="json") for track in tracks],
-        }
-        version = hashlib.sha256(
-            json.dumps(version_payload, sort_keys=True).encode("utf-8")
-        ).hexdigest()[:16]
-        return CatalogueResponse.from_entries(orchestras, tracks, version)
-
-    def get_track_canonical_links(self, track_id: str) -> dict[str, str | None] | None:
-        return self.repository.get_track_entry_with_canonical_links(track_id)
+    def get_provider_links(self) -> list[dict[str, object]]:
+        grouped: dict[str, list[dict[str, str | int | None]]] = defaultdict(list)
+        for source in self.repository.get_usable_sources():
+            grouped[str(source.musicbrainz_recording_id)].append(
+                {
+                    "provider": source.provider,
+                    "url": str(source.provider_url),
+                    "durationMs": source.duration_ms,
+                }
+            )
+        return [
+            {
+                "recordingId": recording_id,
+                "links": sorted(links, key=lambda link: (str(link["provider"]), str(link["url"]))),
+            }
+            for recording_id, links in sorted(grouped.items())
+        ]

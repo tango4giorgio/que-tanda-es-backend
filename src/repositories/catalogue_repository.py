@@ -1,109 +1,174 @@
-from collections.abc import Iterable
-
 from psycopg import Connection
 
-from src.models.track_entry import CatalogueTrackEntry
+from src.models.musicbrainz_cache import MusicBrainzCacheRow
+from src.models.provider_source import ProviderSource
 
 
 class CatalogueRepository:
     def __init__(self, conn: Connection):
         self.conn = conn
 
-    def get_usable_catalogue(self) -> tuple[list[tuple[str, str]], list[CatalogueTrackEntry]]:
+    def get_usable_sources(self) -> list[ProviderSource]:
         with self.conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT o.id, o.display_name, t.id, t.orchestra_id, t.recording_id,
-                       t.title, t.preview_url, t.duration_ms, t.is_usable
-                FROM catalogue.orchestra AS o
-                LEFT JOIN catalogue.track_entry AS t
-                  ON t.orchestra_id = o.id AND t.is_usable
-                ORDER BY o.id, t.id
+                SELECT musicbrainz_recording_id, provider, provider_url, duration_ms, is_usable
+                FROM catalogue.recording_provider
+                WHERE is_usable
+                ORDER BY musicbrainz_recording_id, provider, provider_url
                 """
             )
             rows = cursor.fetchall()
-        orchestras: list[tuple[str, str]] = []
-        tracks: list[CatalogueTrackEntry] = []
-        seen_orchestras: set[str] = set()
-        for row in rows:
-            orchestra_id, display_name = row[0], row[1]
-            if orchestra_id not in seen_orchestras:
-                orchestras.append((orchestra_id, display_name))
-                seen_orchestras.add(orchestra_id)
-            if row[2] is not None:
-                tracks.append(
-                    CatalogueTrackEntry(
-                        id=row[2],
-                        orchestra_id=row[3],
-                        recording_id=row[4],
-                        title=row[5],
-                        preview_url=row[6],
-                        duration_ms=row[7],
-                        is_usable=row[8],
-                    )
-                )
-        return orchestras, tracks
-
-    def upsert_orchestra(
-        self, orchestra_id: str, display_name: str, artist_id: str | None = None
-    ) -> None:
-        with self.conn.cursor() as cursor:
-            cursor.execute(
-                """
-                INSERT INTO catalogue.orchestra (id, display_name, artist_id)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (id) DO UPDATE
-                SET display_name = EXCLUDED.display_name,
-                    artist_id = COALESCE(EXCLUDED.artist_id, catalogue.orchestra.artist_id)
-                """,
-                (orchestra_id, display_name, artist_id),
+        return [
+            ProviderSource(
+                musicbrainz_recording_id=row[0],
+                provider=row[1],
+                provider_url=row[2],
+                duration_ms=row[3],
+                is_usable=row[4],
             )
+            for row in rows
+        ]
 
-    def upsert_track_entry(self, track: CatalogueTrackEntry) -> None:
+    def upsert_source(self, source: ProviderSource) -> None:
         with self.conn.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO catalogue.track_entry
-                    (id, orchestra_id, recording_id, title, preview_url, duration_ms)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    orchestra_id = EXCLUDED.orchestra_id,
-                    recording_id = EXCLUDED.recording_id,
-                    title = EXCLUDED.title,
-                    preview_url = EXCLUDED.preview_url,
+                INSERT INTO catalogue.recording_provider
+                    (musicbrainz_recording_id, provider, provider_url, duration_ms)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (musicbrainz_recording_id, provider, provider_url) DO UPDATE SET
                     duration_ms = EXCLUDED.duration_ms,
                     updated_at = now()
                 """,
                 (
-                    track.id,
-                    track.orchestra_id,
-                    track.recording_id,
-                    track.title,
-                    track.preview_url,
-                    track.duration_ms,
+                    source.musicbrainz_recording_id,
+                    source.provider,
+                    str(source.provider_url),
+                    source.duration_ms,
                 ),
             )
 
-    def get_track_entry_with_canonical_links(self, track_id: str) -> dict[str, str | None] | None:
+    def get_sources_for_recording(self, recording_id: str) -> list[ProviderSource]:
         with self.conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT t.id, t.recording_id, r.artist_id
-                FROM catalogue.track_entry AS t
-                LEFT JOIN music.recording AS r ON r.id = t.recording_id
-                WHERE t.id = %s
+                SELECT musicbrainz_recording_id, provider, provider_url, duration_ms, is_usable
+                FROM catalogue.recording_provider
+                WHERE musicbrainz_recording_id = %s AND is_usable
+                ORDER BY provider, provider_url
                 """,
-                (track_id,),
+                (recording_id,),
             )
-            row = cursor.fetchone()
-        if row is None:
-            return None
-        return {"id": row[0], "recordingId": row[1], "artistId": row[2]}
+            rows = cursor.fetchall()
+        return [
+            ProviderSource(
+                musicbrainz_recording_id=row[0],
+                provider=row[1],
+                provider_url=row[2],
+                duration_ms=row[3],
+                is_usable=row[4],
+            )
+            for row in rows
+        ]
 
     def commit(self) -> None:
         self.conn.commit()
 
+    def get_recording_ids(self) -> list[str]:
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT DISTINCT musicbrainz_recording_id
+                FROM catalogue.recording_provider
+                ORDER BY musicbrainz_recording_id
+                """
+            )
+            return [str(row[0]) for row in cursor.fetchall()]
 
-def upsert_many(repository: CatalogueRepository, tracks: Iterable[CatalogueTrackEntry]) -> None:
-    for track in tracks:
-        repository.upsert_track_entry(track)
+    def get_cache_row(self, recording_id: str) -> MusicBrainzCacheRow | None:
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT musicbrainz_recording_id, answer_artist_id, answer_artist_name,
+                       metadata_status, source_updated_at, fetched_at, payload_hash
+                FROM catalogue.musicbrainz_recording_cache
+                WHERE musicbrainz_recording_id = %s
+                """,
+                (recording_id,),
+            )
+            row = cursor.fetchone()
+        return (
+            MusicBrainzCacheRow(
+                musicbrainz_recording_id=row[0],
+                answer_artist_id=row[1],
+                answer_artist_name=row[2],
+                metadata_status=row[3],
+                source_updated_at=row[4],
+                fetched_at=row[5],
+                payload_hash=row[6],
+            )
+            if row
+            else None
+        )
+
+    def upsert_cache_row(self, row: MusicBrainzCacheRow) -> None:
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO catalogue.musicbrainz_recording_cache
+                    (musicbrainz_recording_id, answer_artist_id, answer_artist_name,
+                     metadata_status, source_updated_at, fetched_at, payload_hash)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (musicbrainz_recording_id) DO UPDATE SET
+                    answer_artist_id = EXCLUDED.answer_artist_id,
+                    answer_artist_name = EXCLUDED.answer_artist_name,
+                    metadata_status = EXCLUDED.metadata_status,
+                    source_updated_at = EXCLUDED.source_updated_at,
+                    fetched_at = EXCLUDED.fetched_at,
+                    payload_hash = EXCLUDED.payload_hash
+                """,
+                (
+                    row.musicbrainz_recording_id,
+                    row.answer_artist_id,
+                    row.answer_artist_name,
+                    row.metadata_status,
+                    row.source_updated_at,
+                    row.fetched_at,
+                    row.payload_hash,
+                ),
+            )
+
+    def get_cache_status_counts(self, freshness_seconds: int = 86_400) -> dict[str, int]:
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT metadata_status, count(*),
+                       count(*) FILTER (
+                           WHERE fetched_at >= now() - (%s * interval '1 second')
+                       )
+                FROM catalogue.musicbrainz_recording_cache
+                GROUP BY metadata_status
+                ORDER BY metadata_status
+                """
+                ,
+                (freshness_seconds,),
+            )
+            counts = {row[0]: row[1] for row in cursor.fetchall()}
+            cursor.execute(
+                """
+                SELECT
+                    count(*) FILTER (
+                        WHERE fetched_at >= now() - (%s * interval '1 second')
+                    ),
+                    count(*) FILTER (
+                        WHERE fetched_at < now() - (%s * interval '1 second')
+                    )
+                FROM catalogue.musicbrainz_recording_cache
+                """,
+                (freshness_seconds, freshness_seconds),
+            )
+            fresh, stale = cursor.fetchone()
+            counts["fresh"] = fresh
+            counts["stale"] = stale
+            return counts

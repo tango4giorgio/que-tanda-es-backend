@@ -10,7 +10,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_canonical_recording_link_column_exists() -> None:
+def test_musicbrainz_recording_is_the_only_local_music_identity() -> None:
     with connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -18,8 +18,17 @@ def test_canonical_recording_link_column_exists() -> None:
                 SELECT 1
                 FROM information_schema.columns
                 WHERE table_schema = 'catalogue'
-                  AND table_name = 'track_entry'
-                  AND column_name = 'recording_id'
+                  AND table_name = 'recording_provider'
+                  AND column_name = 'musicbrainz_recording_id'
                 """
             )
             assert cursor.fetchone() is not None
+            cursor.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema IN ('catalogue', 'music')
+                  AND table_name IN ('artist', 'recording', 'orchestra', 'track_entry')
+                """
+            )
+            assert cursor.fetchall() == []

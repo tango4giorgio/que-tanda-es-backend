@@ -1,0 +1,12 @@
+{
+  "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "last-updated": "2026-09-15T08:00:00Z",
+  "artist-credit": [
+    {
+      "artist": {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "name": "Example Orchestra"
+      }
+    }
+  ]
+}
