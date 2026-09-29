@@ -4,14 +4,18 @@ import logging
 import sys
 
 import src.handlers.gateway as gateway_module
-from src.handlers.get_round import lambda_handler as get_round_handler
+from src.handlers.get_game import lambda_handler as get_game_handler
+from src.handlers.get_previews import lambda_handler as get_previews_handler
 from src.models.routing import RoutingConfig
 from src.services.gateway_service import GatewayService
 
 # Maps target function names to their in-process handler, so this harness can
 # exercise the full gateway request/response translation without any live AWS
-# Lambda invocation (mirrors invoke_get_round.py's local-invocation approach).
-_LOCAL_TARGETS = {"tango-music-game-get-round": get_round_handler}
+# Lambda invocation.
+_LOCAL_TARGETS = {
+    "tango-music-game-get-game": get_game_handler,
+    "tango-music-game-get-previews": get_previews_handler,
+}
 
 
 class _PayloadResult:
@@ -39,8 +43,13 @@ def _local_routing_config() -> RoutingConfig:
         entries=[
             {
                 "method": "GET",
-                "path": "/round",
-                "target_function_name": "tango-music-game-get-round",
+                "path": "/game",
+                "target_function_name": "tango-music-game-get-game",
+            },
+            {
+                "method": "POST",
+                "path": "/previews",
+                "target_function_name": "tango-music-game-get-previews",
             }
         ]
     )
@@ -49,7 +58,8 @@ def _local_routing_config() -> RoutingConfig:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Invoke the gateway Lambda locally")
     parser.add_argument("--method", default="GET")
-    parser.add_argument("--path", default="/round")
+    parser.add_argument("--path", default="/game")
+    parser.add_argument("--body", default=None)
     args = parser.parse_args()
 
     gateway_module._gateway_service = GatewayService(
@@ -67,7 +77,7 @@ def main() -> int:
             "rawPath": args.path,
             "rawQueryString": "",
             "headers": {},
-            "body": None,
+            "body": args.body,
             "isBase64Encoded": False,
             "requestContext": {"http": {"method": args.method, "path": args.path}},
         },

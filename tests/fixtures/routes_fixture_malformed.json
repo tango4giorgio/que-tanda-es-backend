@@ -1,4 +1,4 @@
 {
   "default_timeout_seconds": 10,
   "entries": [
-    { "method": "GET", "path": "/round", "target_function_name": "tango-music-game-get-round"
+    { "method": "GET", "path": "/game", "target_function_name": "tango-music-game-get-game"

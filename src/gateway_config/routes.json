@@ -3,8 +3,13 @@
   "entries": [
     {
       "method": "GET",
-      "path": "/round",
-      "target_function_name": "tango-music-game-get-round"
+      "path": "/game",
+      "target_function_name": "tango-music-game-get-game"
+    },
+    {
+      "method": "POST",
+      "path": "/previews",
+      "target_function_name": "tango-music-game-get-previews"
     },
     {
       "method": "POST",

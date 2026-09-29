@@ -12,7 +12,11 @@ def test_valid_config_builds_exact_match_index() -> None:
 
     index = config.build_index()
 
-    assert index[("GET", "/round")].target_function_name == "tango-music-game-get-round"
+    assert index[("GET", "/game")].target_function_name == "tango-music-game-get-game"
+    assert (
+        index[("POST", "/previews")].target_function_name
+        == "tango-music-game-get-previews"
+    )
     assert index[("GET", "/leaderboard")].timeout_seconds == 5
     assert ("GET", "/unknown") not in index
 

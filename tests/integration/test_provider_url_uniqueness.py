@@ -4,8 +4,6 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from src.models.provider_source import ProviderSource
-from src.repositories.catalogue_repository import CatalogueRepository
 from src.repositories.db import connection
 
 pytestmark = pytest.mark.skipif(
@@ -14,25 +12,68 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_provider_url_cannot_reference_conflicting_recordings() -> None:
-    provider_url = f"https://example.test/{uuid4()}/track.mp3"
-    with connection() as conn:
-        repository = CatalogueRepository(conn)
-        repository.upsert_source(
-            ProviderSource(
-                musicbrainz_recording_id=uuid4(),
-                provider="archive.org",
-                provider_url=provider_url,
-            )
+def _insert_artist_and_track(conn) -> str:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO artist (display_name) VALUES (%s) RETURNING id",
+            (f"Test Artist {uuid4()}",),
         )
-        repository.commit()
+        (artist_id,) = cursor.fetchone()
+        cursor.execute(
+            "INSERT INTO track (artist_id) VALUES (%s) RETURNING id",
+            (str(artist_id),),
+        )
+        (track_id,) = cursor.fetchone()
+        return str(track_id)
+
+
+def test_track_provider_rejects_a_duplicate_provider_track_id_for_the_same_track() -> None:
+    provider_track_id = str(uuid4())
+    with connection() as conn:
+        track_id = _insert_artist_and_track(conn)
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO track_provider (track_id, provider, provider_track_id)
+                VALUES (%s, 'archive.org', %s)
+                """,
+                (track_id, provider_track_id),
+            )
 
         with pytest.raises(psycopg.errors.UniqueViolation):
-            repository.upsert_source(
-                ProviderSource(
-                    musicbrainz_recording_id=uuid4(),
-                    provider="archive.org",
-                    provider_url=provider_url,
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO track_provider (track_id, provider, provider_track_id)
+                    VALUES (%s, 'archive.org', %s)
+                    """,
+                    (track_id, provider_track_id),
                 )
-            )
         conn.rollback()
+
+
+def test_track_provider_allows_the_same_provider_track_id_for_a_different_provider() -> None:
+    provider_track_id = str(uuid4())
+    with connection() as conn:
+        track_id = _insert_artist_and_track(conn)
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO track_provider (track_id, provider, provider_track_id)
+                VALUES (%s, 'archive.org', %s)
+                """,
+                (track_id, provider_track_id),
+            )
+            cursor.execute(
+                """
+                INSERT INTO track_provider (track_id, provider, provider_track_id)
+                VALUES (%s, 'deezer', %s)
+                """,
+                (track_id, provider_track_id),
+            )
+            cursor.execute(
+                "SELECT count(*) FROM track_provider WHERE track_id = %s",
+                (track_id,),
+            )
+            (count,) = cursor.fetchone()
+            assert count == 2

@@ -31,8 +31,8 @@ def main() -> int:
         entries=[
             {
                 "method": "GET",
-                "path": "/round",
-                "target_function_name": "tango-music-game-get-round",
+                "path": "/game",
+                "target_function_name": "tango-music-game-get-game",
             }
         ]
     )
@@ -40,7 +40,7 @@ def main() -> int:
 
     from src.models.routing import ForwardedRequest
 
-    forwarded = ForwardedRequest(method="GET", path="/round")
+    forwarded = ForwardedRequest(method="GET", path="/game")
 
     for _ in range(args.warmup):
         service.invoke_target(config.entries[0], forwarded)

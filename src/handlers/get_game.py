@@ -8,12 +8,13 @@ from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.event_handler.api_gateway import Response
 from pydantic import ValidationError
 
-from src.models.round import RoundRequest, RoundUnavailableError
+from src.models.round import GameRequest, GameUnavailableError
+from src.repositories.catalogue_repository import CatalogueRepository
 from src.repositories.db import connection
-from src.repositories.round_repository import RoundRepository
-from src.services.round_service import RoundService
+from src.repositories.game_repository import GameRepository
+from src.services.game_service import GameService
 
-logger = Logger(service="tango-music-game-round")
+logger = Logger(service="tango-music-game-game")
 app = APIGatewayHttpResolver()
 
 
@@ -36,15 +37,16 @@ def _error_dict(status_code: int, code: str, message: str) -> dict[str, object]:
     }
 
 
-@app.get("/round")
-def get_round() -> Response:
+@app.get("/game")
+def get_game() -> Response:
     started = monotonic()
     raw_event = app.current_event.raw_event
+    query_params = raw_event.get("queryStringParameters") or {}
     raw_values = parse_qs(raw_event.get("rawQueryString", ""), keep_blank_values=True).get(
         "excludeArtist", []
     )
-    if not raw_values and raw_event.get("queryStringParameters"):
-        value = raw_event["queryStringParameters"].get("excludeArtist")
+    if not raw_values and "excludeArtist" in query_params:
+        value = query_params.get("excludeArtist")
         raw_values = value if isinstance(value, list) else [value]
     try:
         exclusions = frozenset(UUID(value) for value in raw_values)
@@ -52,49 +54,54 @@ def get_round() -> Response:
         return _error(
             400,
             "INVALID_EXCLUDED_ARTIST",
-            "excludeArtist must contain valid MusicBrainz artist identifiers",
+            "excludeArtist must contain valid artist identifiers",
         )
+
     try:
         with connection() as conn:
-            round_response = RoundService(
-                RoundRepository(conn),
-            ).create_round(RoundRequest(excluded_artist_ids=exclusions))
-    except RoundUnavailableError:
+            game_response = GameService(
+                CatalogueRepository(conn),
+                GameRepository(conn),
+                conn,
+            ).create_game(GameRequest(excluded_artist_ids=exclusions))
+    except GameUnavailableError:
         return _error(
             422,
-            "ROUND_UNAVAILABLE",
-            "Not enough eligible artists remain to create a round",
+            "GAME_UNAVAILABLE",
+            "Not enough eligible artists remain to create a complete game",
         )
     logger.info(
-        "Round response assembled",
+        "Game response assembled",
         extra={
             "duration_ms": round((monotonic() - started) * 1_000),
-            "choice_count": len(round_response.choices),
-            "track_count": len(round_response.tracks),
+            "round_count": len(game_response.rounds),
+            "track_count": sum(
+                len(round_.question.track_ids) for round_ in game_response.rounds
+            ),
         },
     )
     return Response(
         status_code=200,
         content_type="application/json",
         headers={"cache-control": "no-store"},
-        body=round_response.model_dump_json(by_alias=True),
+        body=game_response.model_dump_json(by_alias=True),
     )
 
 
 def lambda_handler(event: dict, context: object) -> dict:
     try:
         return app.resolve(event, context)
-    except (ValidationError, ValueError) as error:
-        logger.warning("Invalid round request", extra={"error_type": type(error).__name__})
+    except (ValidationError, ValueError):
+        logger.warning("Invalid game request")
         return _error_dict(
             400,
             "INVALID_EXCLUDED_ARTIST",
-            "excludeArtist must contain valid MusicBrainz artist identifiers",
+            "excludeArtist must contain valid artist identifiers",
         )
     except Exception:
-        logger.exception("Round dependency failed")
+        logger.exception("Game dependency failed")
         return _error_dict(
             503,
-            "ROUND_SERVICE_UNAVAILABLE",
-            "A round could not be prepared",
+            "GAME_SERVICE_UNAVAILABLE",
+            "A game could not be prepared",
         )

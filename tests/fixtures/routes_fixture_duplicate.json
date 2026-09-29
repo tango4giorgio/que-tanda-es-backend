@@ -3,13 +3,13 @@
   "entries": [
     {
       "method": "GET",
-      "path": "/round",
-      "target_function_name": "tango-music-game-get-round"
+      "path": "/game",
+      "target_function_name": "tango-music-game-get-game"
     },
     {
       "method": "GET",
-      "path": "/round",
-      "target_function_name": "tango-music-game-get-round-v2"
+      "path": "/game",
+      "target_function_name": "tango-music-game-get-game-v2"
     }
   ]
 }

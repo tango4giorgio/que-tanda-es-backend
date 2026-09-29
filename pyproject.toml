@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tango-music-game-backend"
 version = "0.1.0"
-description = "Read-only MusicBrainz recording provider registry"
+description = "Game generation, preview resolution, and feedback backend"
 requires-python = ">=3.12"
 dependencies = [
   "aws-lambda-powertools>=2.40,<4",

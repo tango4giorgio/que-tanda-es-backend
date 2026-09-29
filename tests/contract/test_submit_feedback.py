@@ -2,12 +2,11 @@ import json
 from unittest.mock import patch
 
 from src.handlers.submit_feedback import lambda_handler
+from src.repositories.feedback_repository import DuplicateFeedbackError
 
 VALID_BODY = {
-    "roundToken": "6f2c9e2b8c1a4f3daebf2d2e6a5b7c10",
+    "questionId": "77777777-7777-7777-7777-777777777777",
     "trackPosition": 1,
-    "recordingId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-    "correctArtistId": "11111111-1111-1111-1111-111111111111",
     "guessedArtistId": "22222222-2222-2222-2222-222222222222",
     "outcome": "wrong",
     "elapsedMs": 8200,
@@ -63,7 +62,7 @@ def test_submit_feedback_accepts_a_valid_skip() -> None:
 
 
 def test_submit_feedback_rejects_missing_fields() -> None:
-    body = {key: value for key, value in VALID_BODY.items() if key != "roundToken"}
+    body = {key: value for key, value in VALID_BODY.items() if key != "questionId"}
     result = lambda_handler(event(body), None)
 
     assert result["statusCode"] == 400
@@ -102,6 +101,25 @@ def test_submit_feedback_rejects_malformed_json() -> None:
     result = lambda_handler(malformed_event, None)
 
     assert result["statusCode"] == 400
+
+
+def test_submit_feedback_rejects_duplicate_submission_for_the_same_question() -> None:
+    with (
+        patch("src.handlers.submit_feedback.connection"),
+        patch(
+            "src.handlers.submit_feedback.FeedbackService.record_attempt",
+            side_effect=DuplicateFeedbackError(),
+        ),
+    ):
+        result = lambda_handler(event(VALID_BODY), None)
+
+    assert result["statusCode"] == 400
+    assert json.loads(result["body"]) == {
+        "error": {
+            "code": "INVALID_FEEDBACK",
+            "message": "The submitted feedback failed validation",
+        }
+    }
 
 
 def test_submit_feedback_returns_503_on_dependency_failure() -> None:

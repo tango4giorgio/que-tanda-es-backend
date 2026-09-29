@@ -11,8 +11,8 @@ from src.services.gateway_service import GatewayService
 def _config(**entry_overrides: object) -> RoutingConfig:
     entry = {
         "method": "GET",
-        "path": "/round",
-        "target_function_name": "tango-music-game-get-round",
+        "path": "/game",
+        "target_function_name": "tango-music-game-get-game",
     }
     entry.update(entry_overrides)
     return RoutingConfig(entries=[entry])
@@ -36,7 +36,7 @@ def test_invoke_target_relays_successful_response() -> None:
     service = GatewayService(config, lambda_client=_stub_client(target_response))
 
     outcome, response = service.invoke_target(
-        config.entries[0], ForwardedRequest(method="GET", path="/round")
+        config.entries[0], ForwardedRequest(method="GET", path="/game")
     )
 
     assert outcome.status == ForwardingOutcomeStatus.SUCCESS
@@ -51,7 +51,7 @@ def test_invoke_target_maps_function_error_to_invocation_error() -> None:
     )
 
     outcome, response = service.invoke_target(
-        config.entries[0], ForwardedRequest(method="GET", path="/round")
+        config.entries[0], ForwardedRequest(method="GET", path="/game")
     )
 
     assert outcome.status == ForwardingOutcomeStatus.INVOCATION_ERROR
@@ -64,7 +64,7 @@ def test_invoke_target_maps_missing_required_keys_to_malformed_response() -> Non
     service = GatewayService(config, lambda_client=_stub_client({"statusCode": 200}))
 
     outcome, response = service.invoke_target(
-        config.entries[0], ForwardedRequest(method="GET", path="/round")
+        config.entries[0], ForwardedRequest(method="GET", path="/game")
     )
 
     assert outcome.status == ForwardingOutcomeStatus.MALFORMED_RESPONSE
@@ -86,7 +86,7 @@ def test_invoke_target_times_out_when_invocation_exceeds_route_timeout() -> None
     service = GatewayService(config, lambda_client=client)
 
     outcome, response = service.invoke_target(
-        config.entries[0], ForwardedRequest(method="GET", path="/round")
+        config.entries[0], ForwardedRequest(method="GET", path="/game")
     )
 
     assert outcome.status == ForwardingOutcomeStatus.TIMEOUT
@@ -110,7 +110,7 @@ def test_match_route_distinguishes_not_found_from_method_not_allowed() -> None:
     config = _config()
     service = GatewayService(config, lambda_client=_stub_client())
 
-    entry, method_matches_other_path = service.match_route("POST", "/round")
+    entry, method_matches_other_path = service.match_route("POST", "/game")
     assert entry is None
     assert method_matches_other_path is True
 
@@ -127,7 +127,7 @@ def test_successful_invocation_logs_required_fields_without_body_content(caplog)
     service = GatewayService(config, lambda_client=_stub_client(target_response))
 
     with caplog.at_level(logging.INFO, logger="tango-music-game-gateway"):
-        service.invoke_target(config.entries[0], ForwardedRequest(method="GET", path="/round"))
+        service.invoke_target(config.entries[0], ForwardedRequest(method="GET", path="/game"))
 
     assert len(caplog.records) >= 1
     for record in caplog.records:

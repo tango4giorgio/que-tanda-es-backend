@@ -1,27 +1,66 @@
 # Tango Music Game Backend
 
-Read-only round delivery for the tango music guessing game. Supabase stores provider links
-between canonical MusicBrainz recording IDs and playable URLs, plus a rebuildable derived cache
-containing only the artist fields needed to select a round.
+Round delivery and guess feedback for the tango music guessing game. Every played game, round,
+question, track, artist, and guess outcome is persisted as its own relational record (see
+`specs/018-game-data-redesign/data-model.md`) so a game's full history can be reconstructed
+from the database alone.
 
 ## Local setup
 
 ```sh
+# Start the shared Postgres instance (once; see ../ingestion/README.md for details)
+docker compose -f ../ingestion/infra/docker-compose.yml up -d postgres
+
 python3.12 -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
-export DATABASE_URL='postgresql://user:password@host:5432/database'
-psql "$DATABASE_URL" -f src/migrations/0001_create_catalogue_schema.sql
-psql "$DATABASE_URL" -f src/migrations/0002_create_musicbrainz_recording_cache.sql
-psql "$DATABASE_URL" -f src/migrations/0003_create_feedback_schema.sql
+export DATABASE_URL='******host.docker.internal:5432/tango_game'
+psql "$DATABASE_URL" -f src/migrations/0001_create_game_schema.sql
+psql "$DATABASE_URL" -f src/migrations/0002_create_catalogue_entities.sql
+psql "$DATABASE_URL" -f src/migrations/0003_create_question_and_feedback.sql
+psql "$DATABASE_URL" -f src/migrations/0004_seed_artists.sql
+psql "$DATABASE_URL" -f src/migrations/0005_seed_deezer_tracks.sql
+psql "$DATABASE_URL" -f src/migrations/0006_rebuild_gameplay_question_model.sql
+psql "$DATABASE_URL" -f src/migrations/0007_create_question_functions.sql
+psql "$DATABASE_URL" -f src/migrations/0008_create_admin_question_view.sql
+psql "$DATABASE_URL" -f src/migrations/0009_create_game_round_question_links.sql
 pytest -q
 ruff check .
 ```
 
-For local development, `DATABASE_URL` may point to a disposable PostgreSQL database. In Lambda,
-set `DATABASE_URL_PARAMETER_NAME`; the service retrieves and caches the Supabase
-transaction-pooler URL from an AWS SSM Parameter Store `SecureString` parameter (free Standard
-tier, AWS-managed KMS key — no per-secret charge). Optional settings are:
+`0005_seed_deezer_tracks.sql` is generated from confirmed ingestion album relationships by
+`../ingestion/queries/generate_track_seed.sql`. It creates canonical tracks using the existing
+internal `artist.id`, seeds only Deezer provider rows, and caches each provider's track title and
+duration for display without another provider request.
+
+`0007_create_question_functions.sql` adds two catalogue-backed helpers:
+
+- `create_question_for_artist(number_of_tracks, number_of_choices, artist_id)` inserts and
+  returns an aggregate question. It randomly selects one to three provider-backed tracks from
+  the supplied artist and mixes that artist with the requested number of distinct, eligible
+  artist choices.
+- `create_random_question()` selects a random artist with at least three provider-backed
+  tracks and calls `create_question_for_artist(3, 3, artist_id)`.
+
+`0008_create_admin_question_view.sql` creates `admin_question`, with one row per aggregate
+question. Its `tracks` and `artists` columns are ordered JSON arrays containing IDs and cached
+display titles/names. `correct_artist_id` and `correct_artist_name` are resolved from the
+question's tracks. Track titles prefer Deezer and fall back to another cached provider title.
+
+`0009_create_game_round_question_links.sql` replaces direct ownership columns on `round` with
+ordered `game_round` and `round_question` association tables. Both use UUID primary keys,
+audit timestamps, and unique parent/child and parent/position constraints. Existing gameplay
+relationships are preserved during migration.
+
+Local development and integration tests reuse the same Postgres instance as the `ingestion`
+pipeline (a sibling `tango_game`/`tango_game_test` database on that instance) rather than
+provisioning a separate database (see `specs/018-game-data-redesign/research.md` section 1).
+For integration tests, point `DATABASE_URL` at the `tango_game_test` database on the same
+instance instead; `tests/integration/conftest.py` applies all migrations automatically at
+the start of the test session. In Lambda, set `DATABASE_URL_PARAMETER_NAME`; the service
+retrieves and caches the Supabase transaction-pooler URL from an AWS SSM Parameter Store
+`SecureString` parameter (free Standard tier, AWS-managed KMS key, no per-secret charge).
+Optional settings are:
 
 - `DATABASE_CONNECT_TIMEOUT_SECONDS` (default `5`)
 - `DATABASE_STATEMENT_TIMEOUT_MS` (default `5000`)
@@ -37,81 +76,40 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds `get_round.zip`,
-`gateway.zip`, and `submit_feedback.zip` (vendoring dependencies for the `python3.12`/`arm64`
-Lambda runtime, matching `backend-infra`'s `lambda_*.tf`) and publishes them as assets on a
-GitHub Release named after the tag. Then set `backend_release_tag = "v0.2.0"` in
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds `get_game.zip`,
+`get_previews.zip`, `gateway.zip`, and `submit_feedback.zip` for the `python3.12`/`arm64`
+Lambda runtime and publishes them as assets on a GitHub Release. Then set
+`backend_release_tag = "v0.2.0"` in
 `backend-infra/terraform.tfvars` and re-apply.
-
-## Load recording provider links
-
-The loader input must already be enriched with MusicBrainz recording IDs:
-
-```json
-{
-  "recordings": [
-    {
-      "musicBrainzRecordingId": "5a5d9d31-64a7-4a5d-87bd-1934d7efbb84",
-      "sources": [
-        {
-          "provider": "archive.org",
-          "url": "https://archive.org/download/example/track.mp3",
-          "durationMs": 180000
-        }
-      ]
-    }
-  ]
-}
-```
-
-One recording may contain multiple sources from the same or different providers.
-
-```sh
-python scripts/load_provider_links.py --source recording-provider-links.json --dry-run
-python scripts/load_provider_links.py --source recording-provider-links.json
-python scripts/load_provider_links.py --source recording-provider-links.json
-```
-
-The dry run validates without writing. Repeating a real load updates the same composite keys
-and does not create duplicate rows. Invalid provider sources are skipped and reported to
-standard error.
 
 ## API
 
-`GET /round` returns one complete round with exactly three artist choices and one to three
-playable tracks, plus a `roundToken` string that uniquely identifies the round. Repeated
-`excludeArtist` query parameters are accepted. Responses use `Cache-Control: no-store`;
-deployed responses require HTTPS preview URLs. The endpoint returns 400 for malformed
-exclusions, 422 when no complete round remains, and 503 for dependency failures.
+`GET /game` creates and persists a complete game containing exactly three rounds. Each round
+contains three artist choices and one aggregate question. The question exposes its persisted
+`questionId` and an ordered list of one to three internal `trackIds`; preview URLs, provider
+identifiers, and track titles are deliberately excluded. Repeated `excludeArtist` query
+parameters are accepted. The endpoint
+returns 400 for malformed exclusions, 422 when a complete game cannot be formed, and 503 for
+dependency failures.
 
-`POST /feedback` records one anonymous guess/skip outcome for stats purposes only — it has no
-gameplay effect and stores no player-identifying data. The request body carries the round's
-`roundToken`, the track position, recording ID, correct and guessed artist IDs, the outcome
+`POST /previews` accepts `{"trackIds": ["<track-id>", ...]}` for between 1 and 50 internal
+track IDs and returns one playable provider preview per track in request order. Duplicate IDs
+are collapsed. The whole request returns 404 if any requested track has no supported preview,
+rather than returning a partially successful response.
+
+`POST /feedback` records one anonymous guess/skip outcome for stats purposes only. The request
+body carries the `questionId`, one-based `trackPosition`, guessed artist ID (`null` only when
+skipped), and outcome
 (`correct`/`wrong`/`skipped`), and the elapsed time in milliseconds. Successful submissions
-return 202; malformed submissions return 400 (`INVALID_FEEDBACK`); dependency failures return
+return 202; malformed submissions, or a second submission for the same `questionId`, return 400
+(`INVALID_FEEDBACK`); dependency failures return
 503 (`FEEDBACK_SERVICE_UNAVAILABLE`). See
-`../specs/014-guess-feedback-stats/contracts/submit-feedback.md` for the full contract.
+`../specs/018-game-data-redesign/contracts/get-round.md` and
+`../specs/018-game-data-redesign/contracts/submit-feedback.md` for the full contracts.
 
 The runtime uses Supabase transaction pooling, disables prepared statements, reuses at most one
 validated connection per warm Lambda execution environment, and applies bounded connection and
 statement timeouts.
-
-## MusicBrainz boundary
-
-The round endpoint never calls MusicBrainz. Refresh the derived cache with an identifying
-application version and maintainer contact:
-
-```sh
-python3 scripts/refresh_musicbrainz_cache.py --dry-run
-python3 scripts/refresh_musicbrainz_cache.py --status
-python3 scripts/refresh_musicbrainz_cache.py --force
-```
-
-Refreshes use exact recording MBIDs, serial requests, and a minimum one-second interval.
-Fresh rows are skipped unless `--force` is supplied. The command reports eligible,
-ambiguous-credit, not-found, failed, and skipped-fresh counts; `--dry-run` does not write.
-Configure `MUSICBRAINZ_APPLICATION`, `MUSICBRAINZ_VERSION`, `MUSICBRAINZ_MAINTAINER`,
-`MUSICBRAINZ_CACHE_FRESHNESS_SECONDS`, and `MUSICBRAINZ_TIMEOUT_SECONDS` as required.
 
 ## Validation
 
@@ -125,17 +123,18 @@ reported as skipped. The local invocation helper requires a populated database a
 repeated exclusions:
 
 ```sh
-python3 -m tests.tools.invoke_get_round
-python3 -m tests.tools.invoke_get_round --exclude-artist 11111111-1111-1111-1111-111111111111
+python3 -m tests.tools.invoke_get_game
+python3 -m tests.tools.invoke_get_game --exclude-artist 11111111-1111-1111-1111-111111111111
+python3 -m tests.tools.invoke_get_previews aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 ```
 
 ## Performance measurement
 
-`tests/tools/measure_round_latency.py` seeds a deterministic, disposable dataset and measures
-warm `GET /round` invocation latency directly against the Lambda handler:
+`tests/tools/measure_game_latency.py` seeds a deterministic, disposable dataset and measures
+warm `GET /game` invocation latency directly against the Lambda handler:
 
 ```sh
-python3 -m tests.tools.measure_round_latency \
+python3 -m tests.tools.measure_game_latency \
   --seed-rows 10000 --iterations 200 --warmup 10
 ```
 
@@ -148,19 +147,13 @@ PostgreSQL instance before running it, for example a throwaway Docker container:
 docker run -d --name tango-round-perf -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=tango \
   -p 5433:5432 postgres:16
 export DATABASE_URL='postgresql://postgres:postgres@localhost:5433/tango'
-python3 -m tests.tools.measure_round_latency --seed-rows 10000 --iterations 200 --warmup 10
+python3 -m tests.tools.measure_game_latency --seed-rows 10000 --iterations 200 --warmup 10
 docker rm -f tango-round-perf
 ```
 
-**Measured result (2026-09-15, disposable PostgreSQL 16 in a local container, 10,000 seeded
-provider-link and cache rows across 400 artists, 200 warm iterations after 10 warm-up calls):**
-`median_ms=55.54`, `p95_ms=98.25`, meeting the warm `GET /round` p95 < 500 ms target (SC-005).
-An initial measurement against the unoptimised query (fetching and validating every eligible
-provider-link row per request) recorded `p95_ms=1018.82`, which failed the target; the round
-repository and service were changed to fetch only the distinct eligible artists and the chosen
-correct artist's recordings per request, which resolved the regression. This is a local,
-single-process measurement, not a deployed Lambda cold/warm benchmark; treat it as a reproducible
-lower bound rather than a production SLA guarantee.
+The prior `GET /round` measurements are no longer representative because one `GET /game`
+request now creates all three rounds. Re-run this helper on a disposable database before
+recording a replacement performance baseline.
 
 ## Gateway overhead measurement
 
@@ -186,8 +179,8 @@ executed and passed on 2026-09-15:
 
 1. `pytest tests/unit/test_routing_config.py tests/unit/test_gateway_service.py
    tests/contract/test_gateway_handler.py -v` — all 24 tests passed.
-2. `python3 -m tests.tools.invoke_gateway --method GET --path /round` (relays the real
-   `get_round` handler in-process), `--method POST --path /round` (`405`), and `--method GET
+2. `python3 -m tests.tools.invoke_gateway --method GET --path /game` (relays the real
+   `get_game` handler in-process), `--method POST --path /game` (`405`), and `--method GET
    --path /unknown` (`404`) all returned the expected results.
 3. `terraform fmt -check` and `terraform validate` in `backend-infra/` both succeeded.
 

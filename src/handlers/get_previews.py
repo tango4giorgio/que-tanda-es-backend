@@ -5,12 +5,12 @@ from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.event_handler.api_gateway import Response
 from pydantic import ValidationError
 
-from src.models.feedback import FeedbackSubmission
+from src.models.round import PreviewRequest, TrackPreviewNotFoundError
+from src.repositories.catalogue_repository import CatalogueRepository
 from src.repositories.db import connection
-from src.repositories.feedback_repository import FeedbackRejectedError, FeedbackRepository
-from src.services.feedback_service import FeedbackService
+from src.services.preview_service import PreviewService
 
-logger = Logger(service="tango-music-game-feedback")
+logger = Logger(service="tango-music-game-previews")
 app = APIGatewayHttpResolver()
 
 
@@ -33,35 +33,32 @@ def _error_dict(status_code: int, code: str, message: str) -> dict[str, object]:
     }
 
 
-@app.post("/feedback")
-def submit_feedback() -> Response:
+@app.post("/previews")
+def get_previews() -> Response:
     try:
-        submission = FeedbackSubmission.model_validate(app.current_event.json_body)
+        request = PreviewRequest.model_validate(app.current_event.json_body)
     except ValidationError:
-        # No player-identifying detail (or raw payload) is logged here, matching FR-006.
-        logger.warning("Invalid feedback submission rejected")
         return _error(
             400,
-            "INVALID_FEEDBACK",
-            "The submitted feedback failed validation",
+            "INVALID_TRACK_IDS",
+            "trackIds must contain between 1 and 50 valid track identifiers",
         )
     try:
         with connection() as conn:
-            FeedbackService(FeedbackRepository(conn)).record_attempt(submission)
-    except FeedbackRejectedError:
-        # Covers both a duplicate submission for the same question (FR-007) and an
-        # unrecognised questionId (contracts/submit-feedback.md).
-        logger.warning("Feedback submission rejected")
+            response = PreviewService(CatalogueRepository(conn)).get_previews(
+                request.track_ids
+            )
+    except TrackPreviewNotFoundError:
         return _error(
-            400,
-            "INVALID_FEEDBACK",
-            "The submitted feedback failed validation",
+            404,
+            "TRACK_PREVIEW_NOT_FOUND",
+            "No playable preview exists for one or more requested tracks",
         )
     return Response(
-        status_code=202,
+        status_code=200,
         content_type="application/json",
         headers={"cache-control": "no-store"},
-        body=json.dumps({"status": "recorded"}),
+        body=response.model_dump_json(by_alias=True),
     )
 
 
@@ -69,16 +66,15 @@ def lambda_handler(event: dict, context: object) -> dict:
     try:
         return app.resolve(event, context)
     except (ValidationError, ValueError):
-        logger.warning("Invalid feedback request")
         return _error_dict(
             400,
-            "INVALID_FEEDBACK",
-            "The submitted feedback failed validation",
+            "INVALID_TRACK_IDS",
+            "trackIds must contain between 1 and 50 valid track identifiers",
         )
     except Exception:
-        logger.exception("Feedback dependency failed")
+        logger.exception("Preview dependency failed")
         return _error_dict(
             503,
-            "FEEDBACK_SERVICE_UNAVAILABLE",
-            "The feedback record could not be saved",
+            "PREVIEW_SERVICE_UNAVAILABLE",
+            "Track previews could not be resolved",
         )

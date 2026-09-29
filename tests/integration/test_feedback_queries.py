@@ -2,8 +2,15 @@ import os
 from uuid import uuid4
 
 import pytest
+from psycopg.types.json import Jsonb
 
+from src.models.feedback import FeedbackSubmission
 from src.repositories.db import connection
+from src.repositories.feedback_repository import (
+    DuplicateFeedbackError,
+    FeedbackRepository,
+    InvalidTrackPositionError,
+)
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("DATABASE_URL"),
@@ -11,111 +18,238 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _insert_attempt(
-    conn,
-    *,
-    round_token: str,
-    track_position: int,
-    correct_artist_id,
-    outcome: str,
-    elapsed_ms: int,
+def _seed_question(conn, *, track_ids, choice_artist_ids) -> str:
+    """Seed one aggregate question and its owning round."""
+    with conn.cursor() as cursor:
+        cursor.execute("INSERT INTO game DEFAULT VALUES RETURNING id")
+        (game_id,) = cursor.fetchone()
+        cursor.execute(
+            "INSERT INTO question (track_ids, artist_ids) VALUES (%s, %s) RETURNING id",
+            (Jsonb(track_ids), Jsonb(choice_artist_ids)),
+        )
+        (question_id,) = cursor.fetchone()
+        cursor.execute(
+            "INSERT INTO round DEFAULT VALUES RETURNING id"
+        )
+        (round_id,) = cursor.fetchone()
+        cursor.execute(
+            """
+            INSERT INTO game_round (game_id, round_id, sequence_number)
+            VALUES (%s, %s, 1)
+            """,
+            (str(game_id), str(round_id)),
+        )
+        cursor.execute(
+            """
+            INSERT INTO round_question (round_id, question_id, sequence_number)
+            VALUES (%s, %s, 1)
+            """,
+            (str(round_id), str(question_id)),
+        )
+        return str(question_id)
+
+
+def _seed_artist_and_track(conn) -> tuple[str, str]:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO artist (display_name) VALUES (%s) RETURNING id",
+            (f"Test Artist {uuid4()}",),
+        )
+        (artist_id,) = cursor.fetchone()
+        cursor.execute(
+            "INSERT INTO track (artist_id) VALUES (%s) RETURNING id",
+            (str(artist_id),),
+        )
+        (track_id,) = cursor.fetchone()
+        return str(artist_id), str(track_id)
+
+
+def _submit(
+    conn, *, question_id, track_position, guessed_artist_id, outcome, elapsed_ms
 ) -> None:
-    guessed_artist_id = None if outcome == "skipped" else correct_artist_id
-    conn.execute(
-        """
-        INSERT INTO feedback.guess_attempt
-            (round_token, track_position, recording_id, correct_artist_id,
-             guessed_artist_id, outcome, elapsed_ms)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            round_token,
-            track_position,
-            str(uuid4()),
-            str(correct_artist_id),
-            str(guessed_artist_id) if guessed_artist_id else None,
-            outcome,
-            elapsed_ms,
-        ),
+    FeedbackRepository(conn).insert_attempt(
+        FeedbackSubmission.model_validate(
+            {
+                "questionId": question_id,
+                "trackPosition": track_position,
+                "guessedArtistId": guessed_artist_id,
+                "outcome": outcome,
+                "elapsedMs": elapsed_ms,
+            }
+        )
     )
 
 
-def test_feedback_queries_compute_accuracy_and_average_elapsed_per_artist_and_position() -> None:
-    artist_a = uuid4()
-    artist_b = uuid4()
-
+def test_get_by_track_id_returns_only_feedback_for_questions_presenting_that_track() -> None:
     with connection() as conn:
-        # Artist A: two attempts at track position 1 (one correct, one wrong).
-        _insert_attempt(
+        artist_a, track_a = _seed_artist_and_track(conn)
+        artist_b, track_b = _seed_artist_and_track(conn)
+        artist_c, _track_c = _seed_artist_and_track(conn)
+
+        question_one = _seed_question(
+            conn, track_ids=[track_a], choice_artist_ids=[artist_a, artist_b, artist_c]
+        )
+        question_two = _seed_question(
+            conn, track_ids=[track_a], choice_artist_ids=[artist_a, artist_b, artist_c]
+        )
+        unrelated_question = _seed_question(
+            conn, track_ids=[track_b], choice_artist_ids=[artist_a, artist_b, artist_c]
+        )
+
+        _submit(
             conn,
-            round_token=f"round-{uuid4().hex}",
+            question_id=question_one,
             track_position=1,
-            correct_artist_id=artist_a,
+            guessed_artist_id=artist_a,
             outcome="correct",
             elapsed_ms=4000,
         )
-        _insert_attempt(
+        _submit(
             conn,
-            round_token=f"round-{uuid4().hex}",
+            question_id=question_two,
             track_position=1,
-            correct_artist_id=artist_a,
+            guessed_artist_id=artist_b,
             outcome="wrong",
             elapsed_ms=8000,
         )
-        # Artist B: one correct attempt at track position 2, one skip at track position 2.
-        _insert_attempt(
+        _submit(
             conn,
-            round_token=f"round-{uuid4().hex}",
-            track_position=2,
-            correct_artist_id=artist_b,
+            question_id=unrelated_question,
+            track_position=1,
+            guessed_artist_id=artist_b,
             outcome="correct",
             elapsed_ms=2000,
         )
-        _insert_attempt(
-            conn,
-            round_token=f"round-{uuid4().hex}",
-            track_position=2,
-            correct_artist_id=artist_b,
-            outcome="skipped",
-            elapsed_ms=30000,
+
+        feedback = FeedbackRepository(conn).get_by_track_id(track_a)
+
+    assert {str(row.question_id) for row in feedback} == {question_one, question_two}
+    assert unrelated_question not in {str(row.question_id) for row in feedback}
+
+
+def test_get_by_artist_id_returns_feedback_for_any_question_offering_that_artist() -> None:
+    with connection() as conn:
+        artist_a, track_a = _seed_artist_and_track(conn)
+        artist_b, track_b = _seed_artist_and_track(conn)
+        artist_c, _track_c = _seed_artist_and_track(conn)
+
+        # Artist A appears as a candidate on both questions (once correct, once a distractor).
+        question_one = _seed_question(
+            conn, track_ids=[track_a], choice_artist_ids=[artist_a, artist_b, artist_c]
+        )
+        question_two = _seed_question(
+            conn, track_ids=[track_b], choice_artist_ids=[artist_a, artist_b, artist_c]
+        )
+        unrelated_question = _seed_question(
+            conn, track_ids=[track_b], choice_artist_ids=[artist_b, artist_c, str(uuid4())]
         )
 
-        by_artist = {
-            row[0]: {"accuracy": row[1], "avg_elapsed_ms": row[2]}
-            for row in conn.execute(
-                """
-                SELECT correct_artist_id::text,
-                       avg((outcome = 'correct')::int)::float AS accuracy,
-                       avg(elapsed_ms)::float AS avg_elapsed_ms
-                FROM feedback.guess_attempt
-                WHERE correct_artist_id IN (%s, %s)
-                GROUP BY correct_artist_id
-                """,
-                (str(artist_a), str(artist_b)),
-            ).fetchall()
-        }
+        _submit(
+            conn,
+            question_id=question_one,
+            track_position=1,
+            guessed_artist_id=artist_a,
+            outcome="correct",
+            elapsed_ms=4000,
+        )
+        _submit(
+            conn,
+            question_id=question_two,
+            track_position=1,
+            guessed_artist_id=artist_b,
+            outcome="wrong",
+            elapsed_ms=8000,
+        )
+        _submit(
+            conn,
+            question_id=unrelated_question,
+            track_position=1,
+            guessed_artist_id=artist_b,
+            outcome="correct",
+            elapsed_ms=2000,
+        )
 
-        by_position = {
-            row[0]: {"accuracy": row[1], "avg_elapsed_ms": row[2]}
-            for row in conn.execute(
-                """
-                SELECT track_position,
-                       avg((outcome = 'correct')::int)::float AS accuracy,
-                       avg(elapsed_ms)::float AS avg_elapsed_ms
-                FROM feedback.guess_attempt
-                WHERE correct_artist_id IN (%s, %s)
-                GROUP BY track_position
-                """,
-                (str(artist_a), str(artist_b)),
-            ).fetchall()
-        }
+        feedback = FeedbackRepository(conn).get_by_artist_id(artist_a)
 
-    assert by_artist[str(artist_a)]["accuracy"] == pytest.approx(0.5)
-    assert by_artist[str(artist_a)]["avg_elapsed_ms"] == pytest.approx(6000)
-    assert by_artist[str(artist_b)]["accuracy"] == pytest.approx(0.5)
-    assert by_artist[str(artist_b)]["avg_elapsed_ms"] == pytest.approx(16000)
+    assert {str(row.question_id) for row in feedback} == {question_one, question_two}
+    assert unrelated_question not in {str(row.question_id) for row in feedback}
 
-    assert by_position[1]["accuracy"] == pytest.approx(0.5)
-    assert by_position[1]["avg_elapsed_ms"] == pytest.approx(6000)
-    assert by_position[2]["accuracy"] == pytest.approx(0.5)
-    assert by_position[2]["avg_elapsed_ms"] == pytest.approx(16000)
+
+def test_one_question_accepts_feedback_for_each_track_position() -> None:
+    with connection() as conn:
+        artist_a, track_a = _seed_artist_and_track(conn)
+        artist_b, track_b = _seed_artist_and_track(conn)
+        artist_c, _track_c = _seed_artist_and_track(conn)
+        question_id = _seed_question(
+            conn,
+            track_ids=[track_a, track_b],
+            choice_artist_ids=[artist_a, artist_b, artist_c],
+        )
+
+        _submit(
+            conn,
+            question_id=question_id,
+            track_position=1,
+            guessed_artist_id=artist_a,
+            outcome="correct",
+            elapsed_ms=1000,
+        )
+        _submit(
+            conn,
+            question_id=question_id,
+            track_position=2,
+            guessed_artist_id=artist_b,
+            outcome="wrong",
+            elapsed_ms=2000,
+        )
+
+        track_a_positions = [
+            row.track_position for row in FeedbackRepository(conn).get_by_track_id(track_a)
+        ]
+        track_b_positions = [
+            row.track_position for row in FeedbackRepository(conn).get_by_track_id(track_b)
+        ]
+        assert track_a_positions == [1]
+        assert track_b_positions == [2]
+
+
+def test_feedback_rejects_duplicate_or_missing_track_position() -> None:
+    with connection() as conn:
+        artist_a, track_a = _seed_artist_and_track(conn)
+        artist_b, _track_b = _seed_artist_and_track(conn)
+        artist_c, _track_c = _seed_artist_and_track(conn)
+        question_id = _seed_question(
+            conn,
+            track_ids=[track_a],
+            choice_artist_ids=[artist_a, artist_b, artist_c],
+        )
+        _submit(
+            conn,
+            question_id=question_id,
+            track_position=1,
+            guessed_artist_id=artist_a,
+            outcome="correct",
+            elapsed_ms=1000,
+        )
+
+    with connection() as conn:
+        with pytest.raises(DuplicateFeedbackError):
+            _submit(
+                conn,
+                question_id=question_id,
+                track_position=1,
+                guessed_artist_id=artist_b,
+                outcome="wrong",
+                elapsed_ms=2000,
+            )
+
+    with connection() as conn:
+        with pytest.raises(InvalidTrackPositionError):
+            _submit(
+                conn,
+                question_id=question_id,
+                track_position=2,
+                guessed_artist_id=artist_b,
+                outcome="wrong",
+                elapsed_ms=2000,
+            )
