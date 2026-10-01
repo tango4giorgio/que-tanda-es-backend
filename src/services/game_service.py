@@ -15,7 +15,10 @@ from src.models.round import (
 )
 from src.repositories.catalogue_repository import CatalogueRepository, TrackWithProviders
 from src.repositories.game_repository import GameRepository
-from src.services.provider_url_resolver import resolve_preview_url, supports_preview_provider
+from src.services.provider_url_resolver import (
+    PreviewProviderAdaptors,
+    default_preview_provider_adaptors,
+)
 
 MAX_CORRECT_ARTIST_ATTEMPTS = 20
 
@@ -28,12 +31,14 @@ class GameService:
         conn: Connection,
         random_source: Random | Callable[[Sequence[object]], object] | None = None,
         deployed: bool | None = None,
+        adaptors: PreviewProviderAdaptors | None = None,
     ):
         self.catalogue_repository = catalogue_repository
         self.game_repository = game_repository
         self.conn = conn
         self.random_source = random_source or Random()
         self.deployed = deployed_environment() if deployed is None else deployed
+        self.adaptors = adaptors or default_preview_provider_adaptors()
 
     def _choose(self, values: Sequence[object], count: int) -> list[object]:
         if hasattr(self.random_source, "sample"):
@@ -48,13 +53,7 @@ class GameService:
         return chosen
 
     def _has_playable_provider(self, entry: TrackWithProviders) -> bool:
-        for provider in entry.providers:
-            if not supports_preview_provider(provider.provider):
-                continue
-            preview_url = resolve_preview_url(provider.provider, provider.provider_track_id)
-            if not self.deployed or preview_url.startswith("https://"):
-                return True
-        return False
+        return any(self.adaptors.supports(provider.provider) for provider in entry.providers)
 
     def create_game(self, request: GameRequest) -> GameResponse:
         artists = self.catalogue_repository.get_eligible_artists(request.excluded_artist_ids)

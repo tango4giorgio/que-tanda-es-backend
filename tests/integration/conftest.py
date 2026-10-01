@@ -12,52 +12,8 @@ def apply_catalogue_migration() -> None:
         return
 
     migrations = [
-        (
-            Path(__file__).parents[2] / "src" / "migrations" / "0001_create_game_schema.sql"
-        ),
-        (
-            Path(__file__).parents[2]
-            / "src"
-            / "migrations"
-            / "0002_create_catalogue_entities.sql"
-        ),
-        (
-            Path(__file__).parents[2]
-            / "src"
-            / "migrations"
-            / "0003_create_question_and_feedback.sql"
-        ),
-        (Path(__file__).parents[2] / "src" / "migrations" / "0004_seed_artists.sql"),
-        (
-            Path(__file__).parents[2]
-            / "src"
-            / "migrations"
-            / "0005_seed_deezer_tracks.sql"
-        ),
-        (
-            Path(__file__).parents[2]
-            / "src"
-            / "migrations"
-            / "0006_rebuild_gameplay_question_model.sql"
-        ),
-        (
-            Path(__file__).parents[2]
-            / "src"
-            / "migrations"
-            / "0007_create_question_functions.sql"
-        ),
-        (
-            Path(__file__).parents[2]
-            / "src"
-            / "migrations"
-            / "0008_create_admin_question_view.sql"
-        ),
-        (
-            Path(__file__).parents[2]
-            / "src"
-            / "migrations"
-            / "0009_create_game_round_question_links.sql"
-        ),
+        Path(__file__).parents[2] / "src" / "migrations" / "0001_create_schema.sql",
+        Path(__file__).parents[2] / "src" / "migrations" / "0002_seed_catalogue.sql",
     ]
     with psycopg.connect(database_url, prepare_threshold=None) as conn:
         for migration in migrations:

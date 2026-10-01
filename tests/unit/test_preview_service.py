@@ -6,6 +6,7 @@ import pytest
 from src.models.round import TrackPreviewNotFoundError
 from src.models.track import TrackProvider
 from src.services.preview_service import PreviewService
+from src.services.provider_url_resolver import PreviewProviderAdaptors
 
 NOW = datetime.now(UTC)
 TRACK_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
@@ -31,6 +32,17 @@ class FakeCatalogueRepository:
         return {track_id: self.providers.get(track_id, []) for track_id in track_ids}
 
 
+class FakePreviewProviderAdaptor:
+    provider = "deezer"
+
+    def resolve_preview_url(self, provider_track_id: str) -> str | None:
+        return f"https://preview.example/{provider_track_id}.mp3"
+
+
+def adaptors() -> PreviewProviderAdaptors:
+    return PreviewProviderAdaptors([FakePreviewProviderAdaptor()])
+
+
 def test_resolves_one_preview_per_track_in_request_order() -> None:
     second_track_id = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
     repository = FakeCatalogueRepository(
@@ -40,7 +52,7 @@ def test_resolves_one_preview_per_track_in_request_order() -> None:
                 TrackProvider(
                     id=uuid4(),
                     track_id=second_track_id,
-                    provider="archive.org",
+                    provider="deezer",
                     provider_track_id="item",
                     duration_ms=25_000,
                     created_at=NOW,
@@ -50,12 +62,12 @@ def test_resolves_one_preview_per_track_in_request_order() -> None:
         }
     )
 
-    response = PreviewService(repository, deployed=False).get_previews(
+    response = PreviewService(repository, deployed=False, adaptors=adaptors()).get_previews(
         [second_track_id, TRACK_ID]
     )
 
     assert [preview.track_id for preview in response.previews] == [second_track_id, TRACK_ID]
-    assert response.previews[1].preview_url == "https://www.deezer.com/track/123"
+    assert response.previews[1].preview_url == "https://preview.example/123.mp3"
 
 
 def test_skips_unsupported_provider_and_uses_supported_fallback() -> None:
@@ -63,7 +75,9 @@ def test_skips_unsupported_provider_and_uses_supported_fallback() -> None:
         {TRACK_ID: [provider("unknown", "bad"), provider("deezer", "123")]}
     )
 
-    response = PreviewService(repository, deployed=False).get_previews([TRACK_ID])
+    response = PreviewService(repository, deployed=False, adaptors=adaptors()).get_previews(
+        [TRACK_ID]
+    )
 
     assert response.previews[0].provider == "deezer"
 

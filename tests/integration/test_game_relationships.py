@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 import psycopg
 import pytest
@@ -110,73 +109,14 @@ def test_relationship_links_reject_duplicate_parent_positions_and_pairs() -> Non
             )
 
 
-def test_migration_preserves_existing_round_relationships() -> None:
-    migration = (
-        Path(__file__).parents[2]
-        / "src"
-        / "migrations"
-        / "0009_create_game_round_question_links.sql"
-    )
+def test_round_has_no_direct_game_or_question_ownership_columns() -> None:
     with connection() as conn:
-        conn.execute("DROP TABLE round_question, game_round")
-        conn.execute(
-            """
-            ALTER TABLE round
-                ADD COLUMN game_id uuid REFERENCES game (id),
-                ADD COLUMN question_id uuid REFERENCES question (id),
-                ADD COLUMN sequence_number smallint
-            """
-        )
-        game_id = conn.execute("INSERT INTO game DEFAULT VALUES RETURNING id").fetchone()[0]
-        artist_id = conn.execute(
-            "INSERT INTO artist (display_name) VALUES ('Artist') RETURNING id"
-        ).fetchone()[0]
-        track_id = conn.execute(
-            "INSERT INTO track (artist_id) VALUES (%s) RETURNING id",
-            (artist_id,),
-        ).fetchone()[0]
-        question_id = conn.execute(
-            """
-            INSERT INTO question (track_ids, artist_ids)
-            VALUES (jsonb_build_array(%s::text), jsonb_build_array(%s::text))
-            RETURNING id
-            """,
-            (track_id, artist_id),
-        ).fetchone()[0]
-        round_id = conn.execute(
-            """
-            INSERT INTO round (game_id, question_id, sequence_number)
-            VALUES (%s, %s, 2)
-            RETURNING id
-            """,
-            (game_id, question_id),
-        ).fetchone()[0]
-
-        conn.execute(migration.read_text(encoding="utf-8"))
-
         assert conn.execute(
             """
-            SELECT game_id, round_id, sequence_number
-            FROM game_round
-            WHERE round_id = %s
-            """,
-            (round_id,),
-        ).fetchone() == (game_id, round_id, 2)
-        assert conn.execute(
-            """
-            SELECT round_id, question_id, sequence_number
-            FROM round_question
-            WHERE round_id = %s
-            """,
-            (round_id,),
-        ).fetchone() == (round_id, question_id, 1)
-        assert conn.execute(
-            """
-            SELECT count(*)
+            SELECT array_agg(column_name ORDER BY column_name)
             FROM information_schema.columns
             WHERE table_schema = 'public'
               AND table_name = 'round'
               AND column_name IN ('game_id', 'question_id', 'sequence_number')
             """
-        ).fetchone()[0] == 0
-        conn.rollback()
+        ).fetchone()[0] is None

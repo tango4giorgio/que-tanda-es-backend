@@ -20,9 +20,7 @@ from src.handlers.get_game import lambda_handler
 
 SEED_NAMESPACE = UUID("6b6f6f6c-6161-6161-6161-616161616161")
 MIGRATIONS = [
-    Path(__file__).parents[2] / "src" / "migrations" / "0001_create_game_schema.sql",
-    Path(__file__).parents[2] / "src" / "migrations" / "0002_create_catalogue_entities.sql",
-    Path(__file__).parents[2] / "src" / "migrations" / "0003_create_question_and_feedback.sql",
+    Path(__file__).parents[2] / "src" / "migrations" / "0001_create_schema.sql",
 ]
 
 
@@ -65,7 +63,7 @@ def seed_dataset(conn: psycopg.Connection, *, row_count: int, artist_count: int)
             "FROM STDIN"
         ) as copy:
             for index, track_id in enumerate(track_ids):
-                copy.write_row((str(track_id), "archive.org", f"perf-seed-{index}", 120_000))
+                copy.write_row((str(track_id), "deezer", f"perf-seed-{index}", 120_000))
     conn.commit()
     return artist_ids
 

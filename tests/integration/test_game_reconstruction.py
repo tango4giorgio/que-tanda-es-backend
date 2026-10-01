@@ -30,7 +30,7 @@ def _seed_artist_with_playable_track(conn, display_name: str) -> None:
         cursor.execute(
             """
             INSERT INTO track_provider (track_id, provider, provider_track_id, duration_ms)
-            VALUES (%s, 'archive.org', %s, 180000)
+            VALUES (%s, 'deezer', %s, 180000)
             """,
             (str(track_id), f"item-{uuid4().hex}"),
         )

@@ -15,25 +15,19 @@ python3.12 -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
 export DATABASE_URL='******host.docker.internal:5432/tango_game'
-psql "$DATABASE_URL" -f src/migrations/0001_create_game_schema.sql
-psql "$DATABASE_URL" -f src/migrations/0002_create_catalogue_entities.sql
-psql "$DATABASE_URL" -f src/migrations/0003_create_question_and_feedback.sql
-psql "$DATABASE_URL" -f src/migrations/0004_seed_artists.sql
-psql "$DATABASE_URL" -f src/migrations/0005_seed_deezer_tracks.sql
-psql "$DATABASE_URL" -f src/migrations/0006_rebuild_gameplay_question_model.sql
-psql "$DATABASE_URL" -f src/migrations/0007_create_question_functions.sql
-psql "$DATABASE_URL" -f src/migrations/0008_create_admin_question_view.sql
-psql "$DATABASE_URL" -f src/migrations/0009_create_game_round_question_links.sql
+psql "$DATABASE_URL" -f src/migrations/0001_create_schema.sql
+psql "$DATABASE_URL" -f src/migrations/0002_seed_catalogue.sql
 pytest -q
 ruff check .
 ```
 
-`0005_seed_deezer_tracks.sql` is generated from confirmed ingestion album relationships by
+`0002_seed_catalogue.sql` contains generated artist and Deezer track seed data. Its artist section
+is generated from confirmed ingestion matching; its Deezer track section comes from
 `../ingestion/queries/generate_track_seed.sql`. It creates canonical tracks using the existing
 internal `artist.id`, seeds only Deezer provider rows, and caches each provider's track title and
 duration for display without another provider request.
 
-`0007_create_question_functions.sql` adds two catalogue-backed helpers:
+`0001_create_schema.sql` also adds two catalogue-backed question helpers:
 
 - `create_question_for_artist(number_of_tracks, number_of_choices, artist_id)` inserts and
   returns an aggregate question. It randomly selects one to three provider-backed tracks from
@@ -42,15 +36,15 @@ duration for display without another provider request.
 - `create_random_question()` selects a random artist with at least three provider-backed
   tracks and calls `create_question_for_artist(3, 3, artist_id)`.
 
-`0008_create_admin_question_view.sql` creates `admin_question`, with one row per aggregate
+The same schema file creates `admin_question`, with one row per aggregate
 question. Its `tracks` and `artists` columns are ordered JSON arrays containing IDs and cached
 display titles/names. `correct_artist_id` and `correct_artist_name` are resolved from the
 question's tracks. Track titles prefer Deezer and fall back to another cached provider title.
 
-`0009_create_game_round_question_links.sql` replaces direct ownership columns on `round` with
-ordered `game_round` and `round_question` association tables. Both use UUID primary keys,
+It defines ordered `game_round` and `round_question` association tables instead of direct
+ownership columns on `round`. Both use UUID primary keys,
 audit timestamps, and unique parent/child and parent/position constraints. Existing gameplay
-relationships are preserved during migration.
+relationships are represented through these tables from initialisation.
 
 Local development and integration tests reuse the same Postgres instance as the `ingestion`
 pipeline (a sibling `tango_game`/`tango_game_test` database on that instance) rather than
@@ -96,6 +90,12 @@ dependency failures.
 track IDs and returns one playable provider preview per track in request order. Duplicate IDs
 are collapsed. The whole request returns 404 if any requested track has no supported preview,
 rather than returning a partially successful response.
+
+Preview providers are isolated behind provider adaptors. The Deezer adaptor looks up
+`https://api.deezer.com/track/{providerTrackId}` at request time and returns the API's HTTPS
+`preview` value, which points to the playable MP3 preview rather than the Deezer track page.
+An absent track or preview is treated as unavailable; a Deezer transport or malformed-response
+failure returns 503 (`PREVIEW_SERVICE_UNAVAILABLE`).
 
 `POST /feedback` records one anonymous guess/skip outcome for stats purposes only. The request
 body carries the `questionId`, one-based `trackPosition`, guessed artist ID (`null` only when

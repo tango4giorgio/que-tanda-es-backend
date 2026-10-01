@@ -22,9 +22,9 @@ def _provider(provider: str, provider_track_id: str) -> TrackProvider:
 def test_a_track_can_have_multiple_track_provider_rows() -> None:
     track = Track(id=TRACK_ID, artist_id=ARTIST_ID, created_at=NOW, updated_at=NOW)
     providers = [
-        _provider("archive.org", "example"),
+        _provider("test-provider", "example"),
         _provider("deezer", "123456"),
     ]
 
-    assert {provider.provider for provider in providers} == {"archive.org", "deezer"}
+    assert {provider.provider for provider in providers} == {"test-provider", "deezer"}
     assert {provider.track_id for provider in providers} == {track.id}

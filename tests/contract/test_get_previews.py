@@ -4,6 +4,7 @@ from uuid import UUID
 
 from src.handlers.get_previews import lambda_handler
 from src.models.round import PreviewResponse, TrackPreview, TrackPreviewNotFoundError
+from src.services.provider_url_resolver import ProviderResolutionError
 
 TRACK_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 
@@ -29,7 +30,7 @@ def test_get_previews_contract() -> None:
             TrackPreview(
                 track_id=UUID(TRACK_ID),
                 provider="deezer",
-                preview_url="https://www.deezer.com/track/123",
+                preview_url="https://cdn.example/previews/123.mp3",
                 duration_ms=30_000,
             )
         ]
@@ -46,7 +47,7 @@ def test_get_previews_contract() -> None:
             {
                 "trackId": TRACK_ID,
                 "provider": "deezer",
-                "previewUrl": "https://www.deezer.com/track/123",
+                "previewUrl": "https://cdn.example/previews/123.mp3",
                 "durationMs": 30000,
             }
         ]
@@ -59,7 +60,7 @@ def test_get_previews_deduplicates_track_ids_before_resolution() -> None:
             TrackPreview(
                 track_id=UUID(TRACK_ID),
                 provider="deezer",
-                preview_url="https://www.deezer.com/track/123",
+                preview_url="https://cdn.example/previews/123.mp3",
                 duration_ms=30_000,
             )
         ]
@@ -88,3 +89,14 @@ def test_get_previews_returns_not_found_when_any_track_is_unplayable() -> None:
 
     assert result["statusCode"] == 404
     assert json.loads(result["body"])["error"]["code"] == "TRACK_PREVIEW_NOT_FOUND"
+
+
+def test_get_previews_returns_service_unavailable_for_a_provider_failure() -> None:
+    with patch("src.handlers.get_previews.connection"), patch(
+        "src.handlers.get_previews.PreviewService.get_previews",
+        side_effect=ProviderResolutionError("Deezer track lookup failed"),
+    ):
+        result = lambda_handler(event({"trackIds": [TRACK_ID]}), None)
+
+    assert result["statusCode"] == 503
+    assert json.loads(result["body"])["error"]["code"] == "PREVIEW_SERVICE_UNAVAILABLE"

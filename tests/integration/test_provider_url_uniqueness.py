@@ -35,7 +35,7 @@ def test_track_provider_rejects_a_duplicate_provider_track_id_for_the_same_track
             cursor.execute(
                 """
                 INSERT INTO track_provider (track_id, provider, provider_track_id)
-                VALUES (%s, 'archive.org', %s)
+                VALUES (%s, 'deezer', %s)
                 """,
                 (track_id, provider_track_id),
             )
@@ -45,7 +45,7 @@ def test_track_provider_rejects_a_duplicate_provider_track_id_for_the_same_track
                 cursor.execute(
                     """
                     INSERT INTO track_provider (track_id, provider, provider_track_id)
-                    VALUES (%s, 'archive.org', %s)
+                    VALUES (%s, 'deezer', %s)
                     """,
                     (track_id, provider_track_id),
                 )
@@ -60,14 +60,14 @@ def test_track_provider_allows_the_same_provider_track_id_for_a_different_provid
             cursor.execute(
                 """
                 INSERT INTO track_provider (track_id, provider, provider_track_id)
-                VALUES (%s, 'archive.org', %s)
+                VALUES (%s, 'deezer', %s)
                 """,
                 (track_id, provider_track_id),
             )
             cursor.execute(
                 """
                 INSERT INTO track_provider (track_id, provider, provider_track_id)
-                VALUES (%s, 'deezer', %s)
+                VALUES (%s, 'test-provider', %s)
                 """,
                 (track_id, provider_track_id),
             )

@@ -32,7 +32,7 @@ def _seed_eligible_artist(conn) -> None:
             """
             INSERT INTO track_provider
                 (track_id, provider, provider_track_id, title, duration_ms)
-            VALUES (%s, 'archive.org', %s, 'Test Track', 180000)
+            VALUES (%s, 'deezer', %s, 'Test Track', 180000)
             """,
             (str(track_id), f"item-{uuid4().hex}"),
         )

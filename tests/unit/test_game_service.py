@@ -33,7 +33,7 @@ def track_with_provider(track_id: str, artist_id: str) -> TrackWithProviders:
             TrackProvider(
                 id=uuid4(),
                 track_id=UUID(track_id),
-                provider="archive.org",
+                provider="deezer",
                 provider_track_id=track_id,
                 duration_ms=120_000,
                 created_at=FIXED_TIME,
