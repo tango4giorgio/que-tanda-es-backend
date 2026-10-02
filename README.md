@@ -15,11 +15,14 @@ python3.12 -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
 export DATABASE_URL='******host.docker.internal:5432/tango_game'
-psql "$DATABASE_URL" -f src/migrations/0001_create_schema.sql
-psql "$DATABASE_URL" -f src/migrations/0002_seed_catalogue.sql
+scripts/run_migrations.sh
 pytest -q
 ruff check .
 ```
+
+`scripts/run_migrations.sh` applies each versioned SQL file once and records its SHA-256
+checksum in `public.schema_migration`. Changing an already-applied migration is rejected;
+create a new migration file instead.
 
 `0002_seed_catalogue.sql` contains generated artist and Deezer track seed data. Its artist section
 is generated from confirmed ingestion matching; its Deezer track section comes from
@@ -70,11 +73,18 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds `get_game.zip`,
-`get_previews.zip`, `gateway.zip`, and `submit_feedback.zip` for the `python3.12`/`arm64`
-Lambda runtime and publishes them as assets on a GitHub Release. Then set
+Pushing a `v*` tag triggers `.github/workflows/release.yml`. It first applies outstanding
+database migrations through the dedicated `migration_runner` connection. Only after those
+succeed does it build `get_game.zip`, `get_previews.zip`, `gateway.zip`, and
+`submit_feedback.zip` for the `python3.12`/`arm64` Lambda runtime and publish them as assets on
+a GitHub Release. Then set
 `backend_release_tag = "v0.2.0"` in
 `backend-infra/terraform.tfvars` and re-apply.
+
+Database creation and role initialisation are not release steps. Run
+`.github/workflows/bootstrap-database.yml` once, through its separately protected
+`database-bootstrap` environment, to create `migration_runner` and the least-privilege
+`app_runtime` role and apply the initial migrations.
 
 ## API
 
