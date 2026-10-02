@@ -10,34 +10,7 @@ on:
       - "v*"
 
 jobs:
-  migrate:
-    name: Apply database migrations
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: production
-    concurrency:
-      group: database-migrations
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check required configuration
-        shell: bash
-        env:
-          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
-        run: |
-          set -euo pipefail
-          [[ -n "$MIGRATION_DATABASE_URL" ]] || { echo "::error::MIGRATION_DATABASE_URL is not configured on the production environment."; exit 1; }
-
-      - name: Apply migrations
-        shell: bash
-        env:
-          DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
-          PGOPTIONS: "-c statement_timeout=60000"
-        run: scripts/run_migrations.sh
-
   build-and-release:
-    needs: migrate
     runs-on: ubuntu-latest
     permissions:
       contents: write
