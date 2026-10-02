@@ -73,18 +73,14 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`. It first applies outstanding
-database migrations through the dedicated `migration_runner` connection. Only after those
-succeed does it build `get_game.zip`, `get_previews.zip`, `gateway.zip`, and
-`submit_feedback.zip` for the `python3.12`/`arm64` Lambda runtime and publish them as assets on
-a GitHub Release. Then set
-`backend_release_tag = "v0.2.0"` in
-`backend-infra/terraform.tfvars` and re-apply.
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds `get_game.zip`,
+`get_previews.zip`, `gateway.zip`, and `submit_feedback.zip` for the
+`python3.12`/`arm64` Lambda runtime and publishes them as immutable GitHub Release assets.
 
-Database creation and role initialisation are not release steps. Run
-`.github/workflows/bootstrap-database.yml` once, through its separately protected
-`database-bootstrap` environment, to create `migration_runner` and the least-privilege
-`app_runtime` role and apply the initial migrations.
+This repository does not initialise or migrate production databases. The infrastructure
+repository checks out the selected backend release, applies its outstanding migrations, and
+then deploys its Lambda packages through Terraform. This keeps production orchestration and
+all production secrets in one repository.
 
 ## API
 

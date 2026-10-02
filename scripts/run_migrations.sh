@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${DATABASE_URL:?DATABASE_URL must contain the migration_runner connection string}"
+if [[ -z "${DATABASE_URL:-}" && -z "${PGHOST:-}" ]]; then
+  echo "Set DATABASE_URL or the standard libpq PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD variables." >&2
+  exit 1
+fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 migrations_dir="${MIGRATIONS_DIR:-$repo_root/src/migrations}"
+psql_connection=()
 
-psql "$DATABASE_URL" \
+if [[ -n "${DATABASE_URL:-}" ]]; then
+  psql_connection=("$DATABASE_URL")
+fi
+
+psql "${psql_connection[@]}" \
   --no-psqlrc \
   --set ON_ERROR_STOP=1 <<'SQL'
 CREATE TABLE IF NOT EXISTS public.schema_migration (
@@ -30,7 +38,7 @@ for migration in "${migrations[@]}"; do
   checksum="$(sha256sum "$migration" | cut -d' ' -f1)"
 
   applied_checksum="$(
-    psql "$DATABASE_URL" \
+    psql "${psql_connection[@]}" \
       --no-psqlrc \
       --tuples-only \
       --no-align \
@@ -55,7 +63,7 @@ SQL
   fi
 
   echo "Applying: $filename"
-  psql "$DATABASE_URL" \
+  psql "${psql_connection[@]}" \
     --no-psqlrc \
     --set ON_ERROR_STOP=1 \
     --single-transaction \
