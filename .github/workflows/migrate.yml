@@ -1,0 +1,57 @@
+name: Run database migrations
+
+# Applies every file under src/migrations in order, using the dedicated migration_runner
+# Postgres role (see src/migrations/0003_create_database_roles.sql) rather than the one-off
+# superuser credential used to create the database itself. Runs on every tagged release so
+# schema changes land before (or alongside) the Lambda packages that depend on them — see
+# release.yml.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-migrations
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required configuration
+        shell: bash
+        env:
+          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
+          MIGRATION_RUNNER_PASSWORD: ${{ secrets.MIGRATION_RUNNER_PASSWORD }}
+          APP_RUNTIME_PASSWORD: ${{ secrets.APP_RUNTIME_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$MIGRATION_DATABASE_URL" ]] || { echo "::error::MIGRATION_DATABASE_URL is not configured on the production environment."; exit 1; }
+          [[ -n "$MIGRATION_RUNNER_PASSWORD" ]] || { echo "::error::MIGRATION_RUNNER_PASSWORD is not configured on the production environment."; exit 1; }
+          [[ -n "$APP_RUNTIME_PASSWORD" ]] || { echo "::error::APP_RUNTIME_PASSWORD is not configured on the production environment."; exit 1; }
+
+      - name: Apply migrations
+        shell: bash
+        env:
+          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
+          PGOPTIONS: "-c statement_timeout=60000"
+          PGPASSWORD_MIGRATION_RUNNER: ${{ secrets.MIGRATION_RUNNER_PASSWORD }}
+          PGPASSWORD_APP_RUNTIME: ${{ secrets.APP_RUNTIME_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for migration in src/migrations/*.sql; do
+            echo "Applying $migration"
+            psql "$MIGRATION_DATABASE_URL" \
+              --set ON_ERROR_STOP=1 \
+              -v migration_runner_password="$PGPASSWORD_MIGRATION_RUNNER" \
+              -v app_runtime_password="$PGPASSWORD_APP_RUNTIME" \
+              -f "$migration"
+          done
