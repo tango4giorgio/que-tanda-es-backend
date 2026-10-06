@@ -94,6 +94,7 @@ class GatewayService:
         return ForwardedRequest(
             method=(http_context.get("method") or event.get("httpMethod") or "GET").upper(),
             path=http_context.get("path") or event.get("rawPath") or "/",
+            raw_query_string=event.get("rawQueryString") or "",
             query_string_parameters=event.get("queryStringParameters"),
             headers=event.get("headers") or {},
             body=event.get("body"),
@@ -103,21 +104,17 @@ class GatewayService:
     @staticmethod
     def to_target_event(forwarded: ForwardedRequest) -> dict[str, Any]:
         """Reconstruct an API Gateway HTTP API v2.0 proxy event for the target Lambda."""
-        query_string = ""
-        if forwarded.query_string_parameters:
-            query_string = "&".join(
-                f"{key}={value}" for key, value in forwarded.query_string_parameters.items()
-            )
         return {
             "version": "2.0",
             "routeKey": f"{forwarded.method} {forwarded.path}",
             "rawPath": forwarded.path,
-            "rawQueryString": query_string,
+            "rawQueryString": forwarded.raw_query_string,
             "queryStringParameters": forwarded.query_string_parameters,
             "headers": forwarded.headers,
             "body": forwarded.body,
             "isBase64Encoded": forwarded.is_base64_encoded,
             "requestContext": {
+                "stage": "$default",
                 "http": {"method": forwarded.method, "path": forwarded.path},
             },
         }

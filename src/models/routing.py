@@ -67,6 +67,7 @@ class ForwardedRequest(BaseModel):
 
     method: str
     path: str
+    raw_query_string: str = ""
     query_string_parameters: dict[str, str] | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     body: str | None = None

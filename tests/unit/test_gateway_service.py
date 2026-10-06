@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+from src.handlers.get_game import lambda_handler as get_game_handler
 from src.models.routing import (
     ForwardedRequest,
     ForwardingOutcomeStatus,
@@ -46,9 +47,7 @@ def test_invoke_target_relays_successful_response() -> None:
 
 def test_invoke_target_maps_function_error_to_invocation_error() -> None:
     config = _config()
-    service = GatewayService(
-        config, lambda_client=_stub_client(function_error="Unhandled")
-    )
+    service = GatewayService(config, lambda_client=_stub_client(function_error="Unhandled"))
 
     outcome, response = service.invoke_target(
         config.entries[0], ForwardedRequest(method="GET", path="/game")
@@ -117,6 +116,37 @@ def test_match_route_distinguishes_not_found_from_method_not_allowed() -> None:
     entry, method_matches_other_path = service.match_route("GET", "/unknown")
     assert entry is None
     assert method_matches_other_path is False
+
+
+def test_target_event_supports_api_gateway_resolver_handlers() -> None:
+    service = GatewayService(_config(), lambda_client=_stub_client())
+    forwarded = ForwardedRequest(
+        method="GET",
+        path="/game",
+        raw_query_string="excludeArtist=not-a-uuid",
+        query_string_parameters={"excludeArtist": "not-a-uuid"},
+    )
+
+    target_event = service.to_target_event(forwarded)
+    response = get_game_handler(target_event, None)
+
+    assert target_event["requestContext"]["stage"] == "$default"
+    assert target_event["rawQueryString"] == "excludeArtist=not-a-uuid"
+    assert response["statusCode"] == 400
+
+
+def test_build_forwarded_request_preserves_raw_query_string() -> None:
+    forwarded = GatewayService.build_forwarded_request(
+        {
+            "version": "2.0",
+            "rawPath": "/game",
+            "rawQueryString": "excludeArtist=first&excludeArtist=second",
+            "queryStringParameters": {"excludeArtist": "second"},
+            "requestContext": {"http": {"method": "GET", "path": "/game"}},
+        }
+    )
+
+    assert forwarded.raw_query_string == "excludeArtist=first&excludeArtist=second"
 
 
 def test_successful_invocation_logs_required_fields_without_body_content(caplog) -> None:
