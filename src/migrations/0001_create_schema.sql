@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS guess_feedback (
     question_id uuid NOT NULL REFERENCES question (id),
     track_position smallint NOT NULL CHECK (track_position BETWEEN 1 AND 3),
     guessed_artist_id uuid NULL REFERENCES artist (id),
-    outcome text NOT NULL CHECK (outcome IN ('correct', 'wrong', 'skipped')),
+    outcome text NOT NULL CHECK (outcome IN ('correct', 'incorrect', 'skipped')),
     elapsed_ms integer NOT NULL CHECK (elapsed_ms BETWEEN 0 AND 30000),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),

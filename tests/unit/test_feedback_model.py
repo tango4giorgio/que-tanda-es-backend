@@ -7,14 +7,14 @@ VALID_BASE = {
     "questionId": "77777777-7777-7777-7777-777777777777",
     "trackPosition": 1,
     "guessedArtistId": "22222222-2222-2222-2222-222222222222",
-    "outcome": "wrong",
+    "outcome": "incorrect",
     "elapsedMs": 8200,
 }
 
 
-def test_accepts_a_valid_wrong_guess_submission() -> None:
+def test_accepts_a_valid_incorrect_guess_submission() -> None:
     submission = FeedbackSubmission.model_validate(VALID_BASE)
-    assert submission.outcome == "wrong"
+    assert submission.outcome == "incorrect"
     assert submission.elapsed_ms == 8200
 
 

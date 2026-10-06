@@ -8,7 +8,7 @@ VALID_BODY = {
     "questionId": "77777777-7777-7777-7777-777777777777",
     "trackPosition": 1,
     "guessedArtistId": "22222222-2222-2222-2222-222222222222",
-    "outcome": "wrong",
+    "outcome": "incorrect",
     "elapsedMs": 8200,
 }
 
@@ -28,7 +28,7 @@ def event(body: dict) -> dict:
     }
 
 
-def test_submit_feedback_accepts_a_valid_wrong_guess() -> None:
+def test_submit_feedback_accepts_a_valid_incorrect_guess() -> None:
     with (
         patch("src.handlers.submit_feedback.connection"),
         patch("src.handlers.submit_feedback.FeedbackService.record_attempt") as mock_record,
@@ -81,7 +81,7 @@ def test_submit_feedback_rejects_guessed_artist_present_on_skip() -> None:
     assert result["statusCode"] == 400
 
 
-def test_submit_feedback_rejects_missing_guessed_artist_on_wrong() -> None:
+def test_submit_feedback_rejects_missing_guessed_artist_on_incorrect() -> None:
     body = {**VALID_BODY, "guessedArtistId": None}
     result = lambda_handler(event(body), None)
 

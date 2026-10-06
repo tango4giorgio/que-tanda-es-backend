@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from src.models.entities import TimestampedEntity
 
-FeedbackOutcome = Literal["correct", "wrong", "skipped"]
+FeedbackOutcome = Literal["correct", "incorrect", "skipped"]
 
 
 class FeedbackSubmission(BaseModel):

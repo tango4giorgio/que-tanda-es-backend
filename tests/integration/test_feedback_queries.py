@@ -109,7 +109,7 @@ def test_get_by_track_id_returns_only_feedback_for_questions_presenting_that_tra
             question_id=question_two,
             track_position=1,
             guessed_artist_id=artist_b,
-            outcome="wrong",
+            outcome="incorrect",
             elapsed_ms=8000,
         )
         _submit(
@@ -157,7 +157,7 @@ def test_get_by_artist_id_returns_feedback_for_any_question_offering_that_artist
             question_id=question_two,
             track_position=1,
             guessed_artist_id=artist_b,
-            outcome="wrong",
+            outcome="incorrect",
             elapsed_ms=8000,
         )
         _submit(
@@ -199,7 +199,7 @@ def test_one_question_accepts_feedback_for_each_track_position() -> None:
             question_id=question_id,
             track_position=2,
             guessed_artist_id=artist_b,
-            outcome="wrong",
+            outcome="incorrect",
             elapsed_ms=2000,
         )
 
@@ -239,7 +239,7 @@ def test_feedback_rejects_duplicate_or_missing_track_position() -> None:
                 question_id=question_id,
                 track_position=1,
                 guessed_artist_id=artist_b,
-                outcome="wrong",
+                outcome="incorrect",
                 elapsed_ms=2000,
             )
 
@@ -250,6 +250,6 @@ def test_feedback_rejects_duplicate_or_missing_track_position() -> None:
                 question_id=question_id,
                 track_position=2,
                 guessed_artist_id=artist_b,
-                outcome="wrong",
+                outcome="incorrect",
                 elapsed_ms=2000,
             )

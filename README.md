@@ -106,7 +106,7 @@ failure returns 503 (`PREVIEW_SERVICE_UNAVAILABLE`).
 `POST /feedback` records one anonymous guess/skip outcome for stats purposes only. The request
 body carries the `questionId`, one-based `trackPosition`, guessed artist ID (`null` only when
 skipped), and outcome
-(`correct`/`wrong`/`skipped`), and the elapsed time in milliseconds. Successful submissions
+(`correct`/`incorrect`/`skipped`), and the elapsed time in milliseconds. Successful submissions
 return 202; malformed submissions, or a second submission for the same `questionId`, return 400
 (`INVALID_FEEDBACK`); dependency failures return
 503 (`FEEDBACK_SERVICE_UNAVAILABLE`). See
