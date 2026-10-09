@@ -8,7 +8,9 @@ from pydantic import ValidationError
 from src.models.feedback import FeedbackSubmission
 from src.repositories.db import connection
 from src.repositories.feedback_repository import FeedbackRejectedError, FeedbackRepository
+from src.repositories.session_repository import SessionRepository
 from src.services.feedback_service import FeedbackService
+from src.services.session_service import InvalidSessionError, SessionService
 
 logger = Logger(service="tango-music-game-feedback")
 app = APIGatewayHttpResolver()
@@ -47,7 +49,19 @@ def submit_feedback() -> Response:
         )
     try:
         with connection() as conn:
-            FeedbackService(FeedbackRepository(conn)).record_attempt(submission)
+            session_service = SessionService(SessionRepository(conn))
+            try:
+                session = session_service.require_active_session(
+                    app.current_event.headers.get("X-Session-Id")
+                )
+            except InvalidSessionError:
+                return _error(
+                    401,
+                    "SESSION_INVALID",
+                    "A valid session is required for this request",
+                )
+            FeedbackService(FeedbackRepository(conn)).record_attempt(submission, session.id)
+            session_service.touch(session.id)
     except FeedbackRejectedError:
         # Covers both a duplicate submission for the same question (FR-007) and an
         # unrecognised questionId (contracts/submit-feedback.md).

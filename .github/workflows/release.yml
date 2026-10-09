@@ -36,6 +36,7 @@ jobs:
           zip -r ../dist/get_game.zip .
           zip -r ../dist/get_previews.zip .
           zip -r ../dist/submit_feedback.zip .
+          zip -r ../dist/create_session.zip .
           zip -r ../dist/gateway.zip .
           cd ..
           rm -rf build
@@ -49,4 +50,4 @@ jobs:
           gh release create "$tag" \
             --title "$tag" \
             --generate-notes \
-            dist/get_game.zip dist/get_previews.zip dist/gateway.zip dist/submit_feedback.zip
+            dist/get_game.zip dist/get_previews.zip dist/gateway.zip dist/submit_feedback.zip dist/create_session.zip

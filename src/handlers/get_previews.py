@@ -8,7 +8,9 @@ from pydantic import ValidationError
 from src.models.round import PreviewRequest, TrackPreviewNotFoundError
 from src.repositories.catalogue_repository import CatalogueRepository
 from src.repositories.db import connection
+from src.repositories.session_repository import SessionRepository
 from src.services.preview_service import PreviewService
+from src.services.session_service import InvalidSessionError, SessionService
 
 logger = Logger(service="tango-music-game-previews")
 app = APIGatewayHttpResolver()
@@ -45,9 +47,21 @@ def get_previews() -> Response:
         )
     try:
         with connection() as conn:
+            session_service = SessionService(SessionRepository(conn))
+            try:
+                session = session_service.require_active_session(
+                    app.current_event.headers.get("X-Session-Id")
+                )
+            except InvalidSessionError:
+                return _error(
+                    401,
+                    "SESSION_INVALID",
+                    "A valid session is required for this request",
+                )
             response = PreviewService(CatalogueRepository(conn)).get_previews(
                 request.track_ids
             )
+            session_service.touch(session.id)
     except TrackPreviewNotFoundError:
         return _error(
             404,

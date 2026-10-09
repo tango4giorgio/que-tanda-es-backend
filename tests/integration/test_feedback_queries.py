@@ -11,6 +11,7 @@ from src.repositories.feedback_repository import (
     FeedbackRepository,
     InvalidTrackPositionError,
 )
+from src.repositories.session_repository import SessionRepository
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("DATABASE_URL"),
@@ -65,7 +66,7 @@ def _seed_artist_and_track(conn) -> tuple[str, str]:
 
 
 def _submit(
-    conn, *, question_id, track_position, guessed_artist_id, outcome, elapsed_ms
+    conn, *, question_id, track_position, guessed_artist_id, outcome, elapsed_ms, session_id=None
 ) -> None:
     FeedbackRepository(conn).insert_attempt(
         FeedbackSubmission.model_validate(
@@ -76,8 +77,35 @@ def _submit(
                 "outcome": outcome,
                 "elapsedMs": elapsed_ms,
             }
-        )
+        ),
+        session_id or SessionRepository(conn).create().id,
     )
+
+
+def test_feedback_retains_the_submitting_session_id() -> None:
+    with connection() as conn:
+        artist_a, track_a = _seed_artist_and_track(conn)
+        artist_b, _track_b = _seed_artist_and_track(conn)
+        artist_c, _track_c = _seed_artist_and_track(conn)
+        question_id = _seed_question(
+            conn, track_ids=[track_a], choice_artist_ids=[artist_a, artist_b, artist_c]
+        )
+        session = SessionRepository(conn).create()
+
+        _submit(
+            conn,
+            question_id=question_id,
+            track_position=1,
+            guessed_artist_id=artist_a,
+            outcome="correct",
+            elapsed_ms=4000,
+            session_id=session.id,
+        )
+
+        feedback = FeedbackRepository(conn).get_by_track_id(track_a)
+
+    assert len(feedback) == 1
+    assert feedback[0].session_id == session.id
 
 
 def test_get_by_track_id_returns_only_feedback_for_questions_presenting_that_track() -> None:

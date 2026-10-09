@@ -13,7 +13,7 @@ class FeedbackSubmission(BaseModel):
     track_position: int = Field(ge=1, le=3, validation_alias="trackPosition")
     guessed_artist_id: UUID | None = Field(validation_alias="guessedArtistId")
     outcome: FeedbackOutcome
-    elapsed_ms: int = Field(ge=0, le=30_000, validation_alias="elapsedMs")
+    elapsed_ms: float = Field(ge=0, le=30_000, validation_alias="elapsedMs")
 
     @model_validator(mode="after")
     def validate_guessed_artist_pairing(self) -> "FeedbackSubmission":
@@ -32,4 +32,5 @@ class GuessFeedback(TimestampedEntity):
     track_position: int
     guessed_artist_id: UUID | None
     outcome: FeedbackOutcome
-    elapsed_ms: int
+    elapsed_ms: float
+    session_id: UUID | None

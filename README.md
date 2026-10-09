@@ -74,7 +74,7 @@ git push origin v0.2.0
 ```
 
 Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds `get_game.zip`,
-`get_previews.zip`, `gateway.zip`, and `submit_feedback.zip` for the
+`get_previews.zip`, `gateway.zip`, `submit_feedback.zip`, and `create_session.zip` for the
 `python3.12`/`arm64` Lambda runtime and publishes them as immutable GitHub Release assets.
 
 This repository does not initialise or migrate production databases. The infrastructure

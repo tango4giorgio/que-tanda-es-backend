@@ -15,6 +15,11 @@
       "method": "POST",
       "path": "/feedback",
       "target_function_name": "tango-music-game-submit-feedback"
+    },
+    {
+      "method": "POST",
+      "path": "/session",
+      "target_function_name": "tango-music-game-create-session"
     }
   ]
 }

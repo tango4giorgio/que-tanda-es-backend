@@ -12,7 +12,9 @@ from src.models.round import GameRequest, GameUnavailableError
 from src.repositories.catalogue_repository import CatalogueRepository
 from src.repositories.db import connection
 from src.repositories.game_repository import GameRepository
+from src.repositories.session_repository import SessionRepository
 from src.services.game_service import GameService
+from src.services.session_service import InvalidSessionError, SessionService
 
 logger = Logger(service="tango-music-game-game")
 app = APIGatewayHttpResolver()
@@ -59,11 +61,23 @@ def get_game() -> Response:
 
     try:
         with connection() as conn:
+            session_service = SessionService(SessionRepository(conn))
+            try:
+                session = session_service.require_active_session(
+                    app.current_event.headers.get("X-Session-Id")
+                )
+            except InvalidSessionError:
+                return _error(
+                    401,
+                    "SESSION_INVALID",
+                    "A valid session is required for this request",
+                )
             game_response = GameService(
                 CatalogueRepository(conn),
                 GameRepository(conn),
                 conn,
             ).create_game(GameRequest(excluded_artist_ids=exclusions))
+            session_service.touch(session.id)
     except GameUnavailableError:
         return _error(
             422,

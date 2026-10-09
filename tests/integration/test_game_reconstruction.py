@@ -8,6 +8,7 @@ from src.handlers.get_game import lambda_handler as get_game_handler
 from src.handlers.get_previews import lambda_handler as get_previews_handler
 from src.handlers.submit_feedback import lambda_handler as submit_feedback_handler
 from src.repositories.db import connection
+from src.repositories.session_repository import SessionRepository
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("DATABASE_URL"),
@@ -36,34 +37,37 @@ def _seed_artist_with_playable_track(conn, display_name: str) -> None:
         )
 
 
-def _game_event(query: str = "") -> dict:
+def _game_event(query: str = "", session_id: str = "") -> dict:
     return {
         "version": "2.0",
         "routeKey": "GET /game",
         "rawPath": "/game",
         "rawQueryString": query,
+        "headers": {"X-Session-Id": session_id},
         "requestContext": {"stage": "$default", "http": {"method": "GET", "path": "/game"}},
     }
 
 
-def _feedback_event(body: dict) -> dict:
+def _feedback_event(body: dict, session_id: str = "") -> dict:
     return {
         "version": "2.0",
         "routeKey": "POST /feedback",
         "rawPath": "/feedback",
         "rawQueryString": "",
+        "headers": {"X-Session-Id": session_id},
         "requestContext": {"stage": "$default", "http": {"method": "POST", "path": "/feedback"}},
         "body": json.dumps(body),
         "isBase64Encoded": False,
     }
 
 
-def _previews_event(track_ids: list[str]) -> dict:
+def _previews_event(track_ids: list[str], session_id: str = "") -> dict:
     return {
         "version": "2.0",
         "routeKey": "POST /previews",
         "rawPath": "/previews",
         "rawQueryString": "",
+        "headers": {"X-Session-Id": session_id},
         "requestContext": {
             "stage": "$default",
             "http": {"method": "POST", "path": "/previews"},
@@ -77,8 +81,9 @@ def test_a_full_game_is_reconstructable_from_persisted_records_alone() -> None:
     with connection() as conn:
         for index in range(4):
             _seed_artist_with_playable_track(conn, f"Test Orchestra {uuid4().hex[:8]}-{index}")
+        session_id = str(SessionRepository(conn).create().id)
 
-    response = get_game_handler(_game_event(), None)
+    response = get_game_handler(_game_event(session_id=session_id), None)
     assert response["statusCode"] == 200
     payload = json.loads(response["body"])
     game_id = payload["gameId"]
@@ -88,7 +93,7 @@ def test_a_full_game_is_reconstructable_from_persisted_records_alone() -> None:
         track_id for question in all_questions for track_id in question["trackIds"]
     ]
     preview_response = get_previews_handler(
-        _previews_event(all_track_ids), None
+        _previews_event(all_track_ids, session_id=session_id), None
     )
     assert preview_response["statusCode"] == 200
     previews = json.loads(preview_response["body"])["previews"]
@@ -107,7 +112,8 @@ def test_a_full_game_is_reconstructable_from_persisted_records_alone() -> None:
                         "guessedArtistId": None,
                         "outcome": "skipped",
                         "elapsedMs": 5000,
-                    }
+                    },
+                    session_id=session_id,
                 ),
                 None,
             )
@@ -121,7 +127,8 @@ def test_a_full_game_is_reconstructable_from_persisted_records_alone() -> None:
                     "guessedArtistId": None,
                     "outcome": "skipped",
                     "elapsedMs": 5000,
-                }
+                },
+                session_id=session_id,
             ),
             None,
         )

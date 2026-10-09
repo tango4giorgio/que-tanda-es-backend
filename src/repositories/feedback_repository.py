@@ -28,14 +28,16 @@ class FeedbackRepository:
     def __init__(self, conn: Connection):
         self.conn = conn
 
-    def insert_attempt(self, submission: FeedbackSubmission) -> None:
+    def insert_attempt(
+        self, submission: FeedbackSubmission, session_id: UUID | None
+    ) -> None:
         try:
             with self.conn.cursor() as cursor:
                 cursor.execute(
                     """
                     INSERT INTO guess_feedback
-                        (question_id, track_position, guessed_artist_id, outcome, elapsed_ms)
-                    VALUES (%s, %s, %s, %s, %s)
+                        (question_id, track_position, guessed_artist_id, outcome, elapsed_ms, session_id)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     """,
                     (
                         str(submission.question_id),
@@ -45,6 +47,7 @@ class FeedbackRepository:
                         else None,
                         submission.outcome,
                         submission.elapsed_ms,
+                        str(session_id) if session_id else None,
                     ),
                 )
         except errors.UniqueViolation as error:
@@ -65,6 +68,7 @@ class FeedbackRepository:
                 elapsed_ms=row[5],
                 created_at=row[6],
                 updated_at=row[7],
+                session_id=row[8],
             )
             for row in rows
         ]
@@ -76,7 +80,7 @@ class FeedbackRepository:
             cursor.execute(
                 """
                 SELECT gf.id, gf.question_id, gf.track_position, gf.guessed_artist_id,
-                       gf.outcome, gf.elapsed_ms, gf.created_at, gf.updated_at
+                       gf.outcome, gf.elapsed_ms, gf.created_at, gf.updated_at, gf.session_id
                 FROM guess_feedback AS gf
                 JOIN question AS q ON q.id = gf.question_id
                 WHERE q.track_ids ->> (gf.track_position - 1) = %s
@@ -94,7 +98,7 @@ class FeedbackRepository:
             cursor.execute(
                 """
                 SELECT gf.id, gf.question_id, gf.track_position, gf.guessed_artist_id,
-                       gf.outcome, gf.elapsed_ms, gf.created_at, gf.updated_at
+                       gf.outcome, gf.elapsed_ms, gf.created_at, gf.updated_at, gf.session_id
                 FROM guess_feedback AS gf
                 JOIN question AS q ON q.id = gf.question_id
                 WHERE q.artist_ids ? %s

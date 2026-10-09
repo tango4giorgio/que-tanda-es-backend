@@ -14,6 +14,11 @@ def apply_catalogue_migration() -> None:
     migrations = [
         Path(__file__).parents[2] / "src" / "migrations" / "0001_create_schema.sql",
         Path(__file__).parents[2] / "src" / "migrations" / "0002_seed_catalogue.sql",
+        Path(__file__).parents[2] / "src" / "migrations" / "0003_create_session_schema.sql",
+        Path(__file__).parents[2]
+        / "src"
+        / "migrations"
+        / "0004_add_session_id_to_guess_feedback.sql",
     ]
     with psycopg.connect(database_url, prepare_threshold=None) as conn:
         for migration in migrations:
@@ -30,5 +35,5 @@ def _reset_schema_between_tests() -> None:
     with psycopg.connect(database_url, prepare_threshold=None) as conn:
         conn.execute(
             "TRUNCATE guess_feedback, round_question, game_round, round, question, game, "
-            "track_provider, track, artist RESTART IDENTITY CASCADE"
+            "track_provider, track, artist, session RESTART IDENTITY CASCADE"
         )
